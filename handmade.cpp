@@ -53,6 +53,7 @@ struct  Win32OffScreenBuffer {
 
 global_variable bool Running = false;
 global_variable Win32OffScreenBuffer GlobalBackBuffer;
+global_variable LPDIRECTSOUNDBUFFER GlobalSecondarySoundBuffer;
 
 struct Win32WindowDimension {
 	int width;
@@ -105,10 +106,13 @@ internal_function void Win32InitDirectSound(HWND window, int32 samples_per_secon
 		secondary_buffer_description.dwFlags = 0;
 		secondary_buffer_description.dwBufferBytes = buffer_size;
 		secondary_buffer_description.lpwfxFormat = &wave_format;
+		HRESULT secondary_buffer_result = direct_sound->CreateSoundBuffer(
+				&secondary_buffer_description,
+				&GlobalSecondarySoundBuffer,
+				0
+			);
 		
-		LPDIRECTSOUNDBUFFER secondary_buffer;
-
-		if(SUCCEEDED(direct_sound->CreateSoundBuffer(&secondary_buffer_description, &secondary_buffer, 0))) {
+		if(SUCCEEDED(secondary_buffer_result)) {
 
 		
 		} else {
@@ -346,11 +350,20 @@ int CALLBACK WinMain(
 		);
 
 		if (window) {
-			Win32InitDirectSound(window, 48000, 48000 * sizeof(int16) * 2);
-
+			int samples_per_second = 48000;
 			Running = true;
 			int x_offset = 0;
 			int y_offset = 0;
+			int hz = 256;
+			int16 tone_volume = 3000;
+			uint32 running_sample_index = 0;
+			int square_wave_period = samples_per_second / hz;
+			int bytes_per_sample = sizeof(int16) * 2;
+			int secondary_buffer_size = samples_per_second * bytes_per_sample;
+
+			Win32InitDirectSound(window, samples_per_second, secondary_buffer_size);
+			GlobalSecondarySoundBuffer->Play(0, 0, DSBPLAY_LOOPING);
+
 			while(Running) {
 				MSG Message;
 				while(PeekMessage(&Message, 0, 0, 0, PM_REMOVE)) {
@@ -402,6 +415,61 @@ int CALLBACK WinMain(
 
 				//GamePadInput();
 				RenderWeirdGradient(&GlobalBackBuffer, x_offset, y_offset);
+
+				DWORD play_cursor;
+				DWORD write_cursor;
+				if(SUCCEEDED(GlobalSecondarySoundBuffer->GetCurrentPosition(
+					&play_cursor,
+					&write_cursor
+				))){
+					DWORD byte_to_lock = (running_sample_index * bytes_per_sample) % secondary_buffer_size;
+					DWORD bytes_to_write;
+					
+					if(byte_to_lock > play_cursor) {
+						bytes_to_write = (secondary_buffer_size - byte_to_lock);
+						bytes_to_write += play_cursor;
+					} else {
+						bytes_to_write = play_cursor - byte_to_lock;
+					}
+
+
+					VOID *region1;
+					DWORD region1_size;
+					VOID *region2;
+					DWORD region2_size;
+
+					if(SUCCEEDED(GlobalSecondarySoundBuffer->Lock(
+							byte_to_lock,
+							bytes_to_write,
+							&region1, &region1_size,
+							&region2, &region2_size,
+							0
+					))) {
+
+
+						int16 *sample_out = (int16 *)region1;
+						DWORD region1_sample_count = region1_size / bytes_per_sample;
+						for(DWORD sample_index = 0; sample_index < region1_sample_count; ++sample_index) {
+							int16 sample_value = (running_sample_index++ / (square_wave_period / 2) % 2) ? tone_volume : -tone_volume;
+							*sample_out++ = sample_value;
+							*sample_out++ = sample_value;
+						}
+						
+
+						DWORD region2_sample_count = region2_size / bytes_per_sample;
+						sample_out = (int16 *)region2;
+						for(DWORD sample_index = 0; sample_index < region2_sample_count; ++sample_index) {
+							int16 sample_value = (running_sample_index++ / (square_wave_period / 2) % 2) ? tone_volume : -tone_volume;
+							*sample_out++ = sample_value;
+							*sample_out++ = sample_value;
+						}
+
+						GlobalSecondarySoundBuffer->Unlock(
+							region1, region1_size,
+							region2, region2_size
+						);
+					}
+				}
 
 				HDC device_context = GetDC(window);
 				Win32WindowDimension dimension = GetWindowDimension(window);
