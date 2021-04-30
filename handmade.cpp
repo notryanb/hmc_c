@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <stdint.h> // Bring in unit8_t to avoid casting to (unsigned char *)
 #include <xinput.h> // Device input like joypads
+#include <dsound.h>
 
 #define internal_function static
 #define local_persist static
@@ -57,6 +58,72 @@ struct Win32WindowDimension {
 	int width;
 	int height;
 };
+
+
+// DIRECTSOUND pointer is written into as an OUT param as the second parameter of
+// DirectSoundCreate().
+internal_function void Win32InitDirectSound(HWND window, int32 samples_per_second, int32 buffer_size) {
+	LPDIRECTSOUND direct_sound;
+
+	if(SUCCEEDED(DirectSoundCreate(0, &direct_sound, 0))) {
+		WAVEFORMATEX wave_format = {};
+		wave_format.wFormatTag = WAVE_FORMAT_PCM;
+		wave_format.nChannels = 2;
+		wave_format.wBitsPerSample = 16;
+		wave_format.nSamplesPerSec = samples_per_second;
+		wave_format.nBlockAlign = (wave_format.nChannels * wave_format.wBitsPerSample) / 8;
+		wave_format.nAvgBytesPerSec = wave_format.nSamplesPerSec * wave_format.nBlockAlign;
+		wave_format.cbSize = 0;
+
+		if(!SUCCEEDED(direct_sound->SetCooperativeLevel(window, DSSCL_PRIORITY))) {
+			LPDIRECTSOUNDBUFFER primary_buffer;
+
+			DSBUFFERDESC buffer_description = {};
+			buffer_description.dwSize = sizeof(buffer_description);
+			buffer_description.dwFlags = DSBCAPS_PRIMARYBUFFER;
+
+			if(SUCCEEDED(direct_sound->CreateSoundBuffer(&buffer_description, &primary_buffer, 0))) {
+
+				if(SUCCEEDED(primary_buffer->SetFormat(&wave_format))) {
+					// Primary buffer is now set up.
+
+				} else { 
+					// TODO - diagnostic
+				}
+
+			
+			} else {
+				// TODO - diagnostic
+			}
+
+		} else {
+			// TODO - failed to set direct sound buffer format
+		}
+
+		DSBUFFERDESC secondary_buffer_description = {};
+		secondary_buffer_description.dwSize = sizeof(secondary_buffer_description);
+		secondary_buffer_description.dwFlags = 0;
+		secondary_buffer_description.dwBufferBytes = buffer_size;
+		secondary_buffer_description.lpwfxFormat = &wave_format;
+		
+		LPDIRECTSOUNDBUFFER secondary_buffer;
+
+		if(SUCCEEDED(direct_sound->CreateSoundBuffer(&secondary_buffer_description, &secondary_buffer, 0))) {
+
+		
+		} else {
+			// TODO - diagnostic
+		}
+		
+
+
+
+
+	} else {
+		// TODO - failed to init direct sound
+	}
+}
+
 
 Win32WindowDimension GetWindowDimension(HWND window) {
 	Win32WindowDimension result;
@@ -279,6 +346,8 @@ int CALLBACK WinMain(
 		);
 
 		if (window) {
+			Win32InitDirectSound(window, 48000, 48000 * sizeof(int16) * 2);
+
 			Running = true;
 			int x_offset = 0;
 			int y_offset = 0;
