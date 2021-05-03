@@ -394,6 +394,9 @@ int CALLBACK WinMain(
 	LPSTR lpCmdLine,
 	int nCmdShow
 ) {
+	LARGE_INTEGER perf_counter_frequency;
+	QueryPerformanceFrequency(&perf_counter_frequency);
+
 	WNDCLASSA WindowClass = {};
 
 	//Win32WindowDimension dimension = GetWindowDimension(Window);
@@ -437,10 +440,15 @@ int CALLBACK WinMain(
 			Win32InitDirectSound(window, sound_output.samples_per_second, sound_output.secondary_buffer_size);
 			Win32FillSoundBuffer(&sound_output, 0, sound_output.secondary_buffer_size);
 			GlobalSecondarySoundBuffer->Play(0, 0, DSBPLAY_LOOPING);
-
+				
 			Running = true;
 
+			LARGE_INTEGER last_counter;
+			QueryPerformanceCounter(&last_counter);
+			int64_t last_cycle_count = __rdtsc();
+
 			while(Running) {
+
 				MSG Message;
 				while(PeekMessage(&Message, 0, 0, 0, PM_REMOVE)) {
 					if (Message.message == WM_QUIT) {
@@ -522,8 +530,34 @@ int CALLBACK WinMain(
 					dimension.width,
 					dimension.height
 				);
+
 				ReleaseDC(window, device_context);
-				++x_offset;
+
+				int64_t end_cycle_count = __rdtsc();
+				int64_t elapsed_cycles = end_cycle_count - last_cycle_count;
+
+				LARGE_INTEGER end_counter;
+				QueryPerformanceCounter(&end_counter);
+
+				int64_t elapsed_counter = end_counter.QuadPart - last_counter.QuadPart;
+				int32_t elapsed_millis = (int32_t)((1000 * elapsed_counter) / perf_counter_frequency.QuadPart);
+				int32_t fps = perf_counter_frequency.QuadPart / elapsed_counter;
+				int32_t mega_cycles_per_frame = (int32_t)(elapsed_cycles / (1000 * 1000));
+
+				char string_buffer[256];
+				wsprintf(
+					string_buffer, 
+					"%dms/frame, %dfps, %dMc/f\n", 
+					elapsed_millis,
+					fps,
+					mega_cycles_per_frame
+				);
+				OutputDebugStringA(string_buffer);
+
+
+				// Close time window
+				last_cycle_count = end_cycle_count;
+				last_counter = end_counter;
 			}
 
 		} else {
