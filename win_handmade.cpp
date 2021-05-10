@@ -48,12 +48,13 @@ global_variable x_input_set_state *XInputSetState_ = XInputSetStateStub;
 
 struct Win32SoundOutput {
 	int samples_per_second;
-	int hz;
+	int toneHz;
 	int tone_volume;
 	uint32_t running_sample_index;
 	int wave_period;
 	int bytes_per_sample;
 	int secondary_buffer_size;
+  int latency_sample_count;
 };
 
 
@@ -75,7 +76,47 @@ struct Win32WindowDimension {
 	int height;
 };
 
-void Win32FillSoundBuffer(Win32SoundOutput *sound_output, DWORD byte_to_lock, DWORD bytes_to_write) {
+static void Win32ClearSoundBuffer(Win32SoundOutput *sound_output) {
+	VOID *region1;
+	DWORD region1_size;
+	VOID *region2;
+	DWORD region2_size;
+
+	HRESULT buffer_lock_result = GlobalSecondarySoundBuffer->Lock(
+			0, sound_output->secondary_buffer_size,
+			&region1, &region1_size,
+			&region2, &region2_size,
+			0
+	);
+
+	if(SUCCEEDED(buffer_lock_result)) {
+		uint8_t *destination_sample = (uint8_t *)region1;
+
+		for(DWORD byte_index = 0; byte_index < region1_size; ++byte_index) {
+			*destination_sample++ = 0;
+		}
+		
+    destination_sample = (uint8_t *)region2;
+
+		for(DWORD byte_index = 0; byte_index < region2_size; ++byte_index) {
+			*destination_sample++ = 0;
+		}
+		
+    GlobalSecondarySoundBuffer->Unlock(
+			region1, region1_size,
+			region2, region2_size
+		);
+	}
+}
+
+
+
+static void Win32FillSoundBuffer(
+    Win32SoundOutput *sound_output, 
+    DWORD byte_to_lock, 
+    DWORD bytes_to_write,
+    GameSoundOutputBuffer *source_buffer
+) {
 	VOID *region1;
 	DWORD region1_size;
 	VOID *region2;
@@ -90,38 +131,26 @@ void Win32FillSoundBuffer(Win32SoundOutput *sound_output, DWORD byte_to_lock, DW
 	);
 
 	if(SUCCEEDED(buffer_lock_result)) {
-		int16 *sample_out = (int16 *)region1;
 		DWORD region1_sample_count = region1_size / sound_output->bytes_per_sample;
-		for(
-			DWORD sample_index = 0; 
-			sample_index < region1_sample_count; 
-			++sample_index
-		) {
-			float wave_position = 2.0f * Pi32 * ((float)sound_output->running_sample_index / (float)sound_output->wave_period);
-			float sine_value = sinf(wave_position);
-			int16_t sample_value = (int16)(sine_value * sound_output->tone_volume);
 
-			*sample_out++ = sample_value;
-			*sample_out++ = sample_value;
+		int16_t *destination_sample = (int16_t *)region1;
+    int16_t *source_sample = source_buffer->samples;
+
+		for(DWORD sample_index = 0; sample_index < region1_sample_count; ++sample_index) {
+			*destination_sample++ = *source_sample++;
+			*destination_sample++ = *source_sample++;
 
 			++sound_output->running_sample_index;
 		}
 		
 
 		DWORD region2_sample_count = region2_size / sound_output->bytes_per_sample;
-		sample_out = (int16 *)region2;
-		for(
-			DWORD sample_index = 0; 
-			sample_index < region2_sample_count; 
-			++sample_index
-		) {
-			float wave_position = 2.0f * Pi32 * ((float)sound_output->running_sample_index / (float)sound_output->wave_period);
-			float sine_value = sinf(wave_position);
-			int16_t sample_value = (int16)(sine_value * sound_output->tone_volume);
+		destination_sample = (int16 *)region2;
 
-			*sample_out++ = sample_value;
-			*sample_out++ = sample_value;
-			
+		for(DWORD sample_index = 0; sample_index < region2_sample_count; ++sample_index) {
+			*destination_sample++ = *source_sample++;
+			*destination_sample++ = *source_sample++;
+
 			++sound_output->running_sample_index;
 		}
 
@@ -135,7 +164,7 @@ void Win32FillSoundBuffer(Win32SoundOutput *sound_output, DWORD byte_to_lock, DW
 
 // DIRECTSOUND pointer is written into as an OUT param as the second parameter of
 // DirectSoundCreate().
-internal_function void Win32InitDirectSound(HWND window, int32 samples_per_second, int32 buffer_size) {
+static void Win32InitDirectSound(HWND window, int32 samples_per_second, int32 buffer_size) {
 	LPDIRECTSOUND direct_sound;
 
 	if(SUCCEEDED(DirectSoundCreate(0, &direct_sound, 0))) {
@@ -214,7 +243,7 @@ Win32WindowDimension GetWindowDimension(HWND window) {
 
 
 // Resize Device Independent BitMap Section
-internal_function void Win32ResizeDIBSection(Win32OffScreenBuffer *buffer, int width, int height) {
+static void Win32ResizeDIBSection(Win32OffScreenBuffer *buffer, int width, int height) {
 
 	if (buffer->memory) {
 		VirtualFree(buffer->memory, 0, MEM_RELEASE);
@@ -232,11 +261,11 @@ internal_function void Win32ResizeDIBSection(Win32OffScreenBuffer *buffer, int w
 	buffer->info.bmiHeader.biCompression = BI_RGB;
 
 	int bitmap_memory_size = (buffer->width * buffer->height) * buffer->bytes_per_pixel;
-	buffer->memory = VirtualAlloc(0, bitmap_memory_size, MEM_COMMIT, PAGE_READWRITE);
+	buffer->memory = VirtualAlloc(0, bitmap_memory_size, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
 	buffer->pitch = width * buffer->bytes_per_pixel;
 }
 
-internal_function void Win32DisplayBufferInWindow(
+static void Win32DisplayBufferInWindow(
 		Win32OffScreenBuffer *buffer,
 		HDC device_context, 
 		int window_width,
@@ -288,17 +317,17 @@ LRESULT CALLBACK  Win32MainWindowCallback(
 			if (was_down == is_down) break;
 
 			if (keycode == 'W') {
-			} else if (keycode == 'A') {
-			} else if (keycode == 'S') {
-			} else if (keycode == 'D') {
-			} else if (keycode == 'Q') {
-			} else if (keycode == 'E') {
-			} else if (keycode == VK_UP) {
-			} else if (keycode == VK_LEFT) {
-			} else if (keycode == VK_DOWN) {
-			} else if (keycode == VK_RIGHT) {
-			} else if (keycode == VK_ESCAPE) {
-			} else if (keycode == VK_SPACE) {
+      } else if (keycode == 'A') {
+      } else if (keycode == 'S') {
+      } else if (keycode == 'D') {
+      } else if (keycode == 'Q') {
+      } else if (keycode == 'E') {
+      } else if (keycode == VK_UP) {
+      } else if (keycode == VK_LEFT) {
+      } else if (keycode == VK_DOWN) {
+      } else if (keycode == VK_RIGHT) {
+      } else if (keycode == VK_ESCAPE) {
+      } else if (keycode == VK_SPACE) {
 			}
 		} break;
 		case WM_PAINT: {
@@ -405,16 +434,24 @@ int CALLBACK WinMain(
 
 			Win32SoundOutput sound_output = {};
 			sound_output.samples_per_second = 48000;
-			sound_output.hz = 256;
+			sound_output.toneHz = 256;
 			sound_output.tone_volume = 3000;
 			sound_output.running_sample_index = 0;
-			sound_output.wave_period = sound_output.samples_per_second / sound_output.hz;
+			sound_output.wave_period = sound_output.samples_per_second / sound_output.toneHz;
 			sound_output.bytes_per_sample = sizeof(int16_t) * 2;
 			sound_output.secondary_buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample;
+      sound_output.latency_sample_count = sound_output.samples_per_second / 15;
 
 			Win32InitDirectSound(window, sound_output.samples_per_second, sound_output.secondary_buffer_size);
-			Win32FillSoundBuffer(&sound_output, 0, sound_output.secondary_buffer_size);
+      Win32ClearSoundBuffer(&sound_output);
 			GlobalSecondarySoundBuffer->Play(0, 0, DSBPLAY_LOOPING);
+
+      int16_t *samples = (int16_t *)VirtualAlloc(
+        0, 
+        sound_output.secondary_buffer_size, 
+        MEM_RESERVE|MEM_COMMIT, 
+        PAGE_READWRITE
+      );
 				
 			Running = true;
 
@@ -433,11 +470,13 @@ int CALLBACK WinMain(
 					TranslateMessage(&Message);	
 					DispatchMessageA(&Message);
 				}
+
 				for(DWORD controller_idx = 0; controller_idx < XUSER_MAX_COUNT; controller_idx++) 
 				{
 					XINPUT_STATE controller_state;
 					if(XInputGetState(controller_idx, &controller_state) == 
-					ERROR_SUCCESS) { // indicates the controller is plugged-in
+            ERROR_SUCCESS) { // indicates the controller is plugged-in
+
 						XINPUT_GAMEPAD *gamepad = &controller_state.Gamepad;
 
 						bool dpad_up = (gamepad->wButtons & XINPUT_GAMEPAD_DPAD_UP);
@@ -453,52 +492,78 @@ int CALLBACK WinMain(
 						bool x_button = (gamepad->wButtons & XINPUT_GAMEPAD_X);
 						bool y_button = (gamepad->wButtons & XINPUT_GAMEPAD_Y);
 
-						int16 stick_hori = gamepad->sThumbLX;
-						int16 stick_vert = gamepad->sThumbLY;
+						int16_t stick_hori = gamepad->sThumbLX;
+						int16_t stick_vert = gamepad->sThumbLY;
 
-						if (a_button) {
-							y_offset += 2;
-						}
+            x_offset += stick_hori / 4096;
+            y_offset += stick_vert / 4096;
+
+            sound_output.toneHz = 512 + (int)(256.0f * ((float)stick_vert / 30000.0f));
+            sound_output.wave_period = sound_output.samples_per_second / sound_output.toneHz;
+
 					} else {
-						// controller is unavailable
-						
+						// Report controller is unavailable
 					}
-
-
 				}
 
+        /*
+        // Setting Controller Vibration for testing
 				XINPUT_VIBRATION Vibration;
 				Vibration.wLeftMotorSpeed = 60000;
 				Vibration.wRightMotorSpeed = 60000;
 				XInputSetState(0, &Vibration);
+        */
+
+        // Start setting up sound buffer
+        DWORD byte_to_lock;
+        DWORD target_cursor;
+        DWORD bytes_to_write;
+				DWORD play_cursor;
+				DWORD write_cursor;
+        bool is_sound_valid = false;
+
+        HRESULT position_result = GlobalSecondarySoundBuffer->GetCurrentPosition(
+					&play_cursor,
+					&write_cursor
+				);
+
+				if(SUCCEEDED(position_result)) {
+					byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % 
+              sound_output.secondary_buffer_size;
+
+          target_cursor = 
+            ((play_cursor +
+              (sound_output.latency_sample_count * sound_output.bytes_per_sample)) %
+              sound_output.secondary_buffer_size);
+				
+					if(byte_to_lock > target_cursor) {
+						bytes_to_write = sound_output.secondary_buffer_size - byte_to_lock;
+						bytes_to_write += target_cursor;
+					} else {
+						bytes_to_write = target_cursor - byte_to_lock;
+					}
+
+          is_sound_valid = true;
+				}
+        
+        // Set sample count based on frame-rate of the game to try and keep
+        // sounds in sync with visuals
+        GameSoundOutputBuffer sound_buffer = {};
+        sound_buffer.samples_per_second = sound_output.samples_per_second;
+        sound_buffer.sample_count = bytes_to_write / sound_output.bytes_per_sample;
+        sound_buffer.samples = samples;
 
 				GameOffScreenBuffer game_offscreen_buffer = {};
 				game_offscreen_buffer.memory = GlobalBackBuffer.memory;
 				game_offscreen_buffer.width =  GlobalBackBuffer.width;
 				game_offscreen_buffer.height = GlobalBackBuffer.height;
 				game_offscreen_buffer.pitch = GlobalBackBuffer.pitch;
-				game_update_and_render(&game_offscreen_buffer);
 
-				DWORD play_cursor;
-				DWORD write_cursor;
-				if(SUCCEEDED(GlobalSecondarySoundBuffer->GetCurrentPosition(
-					&play_cursor,
-					&write_cursor
-				))){
-					DWORD byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.secondary_buffer_size;
-					DWORD bytes_to_write;
-				
-					if(byte_to_lock == play_cursor) {
-						bytes_to_write = 0;
-					} else if(byte_to_lock > play_cursor) {
-						bytes_to_write = (sound_output.secondary_buffer_size - byte_to_lock);
-						bytes_to_write += play_cursor;
-					} else {
-						bytes_to_write = play_cursor - byte_to_lock;
-					}
+				game_update_and_render(&game_offscreen_buffer, &sound_buffer, sound_output.toneHz);
 
-					Win32FillSoundBuffer(&sound_output, byte_to_lock, bytes_to_write);
-				}
+        if (is_sound_valid) {
+					Win32FillSoundBuffer(&sound_output, byte_to_lock, bytes_to_write, &sound_buffer);
+        }
 
 				HDC device_context = GetDC(window);
 				Win32WindowDimension dimension = GetWindowDimension(window);
@@ -546,8 +611,6 @@ int CALLBACK WinMain(
 		// TODO: Handle Failure of window creation
 	}
 	
-
-
 	return(0);
 }
 
