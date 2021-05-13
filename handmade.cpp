@@ -31,7 +31,6 @@ static void render_weird_gradient(GameOffScreenBuffer *buffer, int x_offset, int
 static void output_sound(GameSoundOutputBuffer *sound_buffer, int toneHz) {
     static float tSine; 
     int16_t tone_volume = 3000;
-	  //int toneHz = 256;
     int wave_period = sound_buffer->samples_per_second / toneHz;
 
 		int16_t *sample_out = sound_buffer->samples;
@@ -47,13 +46,27 @@ static void output_sound(GameSoundOutputBuffer *sound_buffer, int toneHz) {
 }
 
 static void game_update_and_render(
+    GameInput *input,
     GameOffScreenBuffer *buffer, 
-    GameSoundOutputBuffer *sound_buffer,
-    int toneHz
+    GameSoundOutputBuffer *sound_buffer
 ) {
-  output_sound(sound_buffer, toneHz);
+	static int blue_offset = 0;
+	static int green_offset = 0;
+  static int toneHz = 256;
 
-	int blue_offset = 0;
-	int green_offset = 0;
+  GameControllerInput *input0 = &input->controllers[0];
+
+  if(input0->is_analog) {
+    blue_offset += (int)(4.0f * (input0->end_x));
+    toneHz = 256 + (int)(128.0f * (input0->end_y));
+  } else {
+
+  }
+
+  if(input0->down.ended_down) {
+    green_offset += 1;
+  }
+
+  output_sound(sound_buffer, toneHz);
 	render_weird_gradient(buffer, blue_offset, green_offset);
 };
