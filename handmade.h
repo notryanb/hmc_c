@@ -3,6 +3,15 @@
 // Macros
 #define ArrayCount(array) (sizeof(array) / sizeof((array)[0]))
 
+struct DebugFileReadResult {
+  uint32_t contents_size;
+  void *contents;
+};
+
+DebugFileReadResult debug_platform_read_entire_file(char *file_name);
+void debug_platform_free_file_memory(void *memory);
+bool debug_platform_write_entire_file(char *file_name, uint32_t memory_size, void *memory);
+
 // Data Structures
 struct GameOffScreenBuffer {
 	void *memory;
@@ -50,6 +59,20 @@ struct GameControllerInput {
   };
 };
 
+struct GameState {
+  int tone_hz;
+  int blue_offset;
+  int green_offset;
+};
+
+struct GameMemory {
+  bool is_initialized;
+  uint64_t permanent_storage_size;
+  void *permanent_storage;
+  uint64_t transient_storage_size;
+  void *transient_storage;
+};
+
 struct GameInput {
   GameControllerInput controllers[4];
 };
@@ -58,6 +81,7 @@ struct GameInput {
 // Fuctions
 
 static void game_update_and_render(
+    GameMemory *game_memory,
     GameInput *game_input,
     GameOffScreenBuffer *buffer,
     GameSoundOutputBuffer *sound_buffer

@@ -51,7 +51,115 @@ global_variable bool Running = false;
 global_variable Win32OffScreenBuffer GlobalBackBuffer;
 global_variable LPDIRECTSOUNDBUFFER GlobalSecondarySoundBuffer;
 
-static void win32_process_x_input_button(
+static DebugFileReadResult
+debug_platform_read_entire_file(char *file_name) {
+  DebugFileReadResult result = {};
+
+  HANDLE file_handle = CreateFileA(
+    file_name, 
+    GENERIC_READ,
+    FILE_SHARE_READ,
+    0,
+    OPEN_EXISTING,
+    0,
+    0
+  );
+
+  if (file_handle != INVALID_HANDLE_VALUE) {
+    LARGE_INTEGER file_size;
+
+    if(GetFileSizeEx(file_handle, &file_size)) {
+      result.contents = VirtualAlloc(
+        0, 
+        file_size.QuadPart, 
+        MEM_RESERVE | MEM_COMMIT, 
+        PAGE_READWRITE
+      );
+
+      if (result.contents) {
+        DWORD bytes_read;
+
+        if (ReadFile(
+          file_handle,
+          result.contents,
+          file_size.QuadPart,
+          &bytes_read,
+          0
+        )) {
+          // TODO - implement success file read
+          result.contents_size = (uint32_t)file_size.QuadPart;
+        }
+        else {
+          debug_platform_free_file_memory(result.contents);
+          result.contents = 0;
+        }
+      }
+      else {
+        // TODO - log error
+      }
+    }
+    else {
+      // TODO - log error
+    }
+
+    CloseHandle(file_handle);
+  }
+  else {
+    // TODO - log error
+  }
+
+  return(result);
+}
+
+static void 
+debug_platform_free_file_memory(void *memory) {
+  if(memory) {
+    VirtualFree(memory, 0, MEM_RELEASE);
+  }
+}
+
+static bool 
+debug_platform_write_entire_file(char *file_name, uint32_t memory_size, void *memory) {
+  bool result = false;
+
+  HANDLE file_handle = CreateFileA(
+    file_name, 
+    GENERIC_WRITE,
+    FILE_SHARE_READ,
+    0,
+    CREATE_ALWAYS,
+    0,
+    0
+  );
+
+  if (file_handle != INVALID_HANDLE_VALUE) {
+    DWORD bytes_written;
+    if (WriteFile(
+      file_handle,
+      memory,
+      memory_size,
+      &bytes_written,
+      0
+    )) {
+      result = bytes_written == memory_size;
+    }
+    else {
+      // TODO - log error
+    }
+
+    CloseHandle(file_handle);
+  }
+  else {
+    // TODO - log error
+  }
+
+  return(result);
+}
+
+
+
+static void 
+win32_process_x_input_button(
     DWORD x_input_button_state,
     DWORD button_bit, 
     GameButtonState *old_button_state,
@@ -63,7 +171,8 @@ static void win32_process_x_input_button(
 }
 
 
-static void Win32ClearSoundBuffer(Win32SoundOutput *sound_output) {
+static void 
+Win32ClearSoundBuffer(Win32SoundOutput *sound_output) {
 	VOID *region1;
 	DWORD region1_size;
 	VOID *region2;
@@ -396,6 +505,26 @@ int CALLBACK WinMain(
 				
 			Running = true;
 
+      // Initialize game memory
+      GameMemory game_memory = {};
+      game_memory.permanent_storage_size = 64 * 1024 * 1024; // 64MB
+      game_memory.permanent_storage = VirtualAlloc(
+        0, 
+        game_memory.permanent_storage_size, 
+        MEM_RESERVE|MEM_COMMIT, 
+        PAGE_READWRITE
+      );
+
+      game_memory.transient_storage_size = (uint64_t)4 * 1024 * 1024 * 1024; // 4GB
+      game_memory.transient_storage = VirtualAlloc(
+        0, 
+        game_memory.transient_storage_size, 
+        MEM_RESERVE|MEM_COMMIT, 
+        PAGE_READWRITE
+      );
+
+
+      // Initialize Controllers
       GameInput game_input[2] = {};
       GameInput *new_input = &game_input[0];
       GameInput *old_input = &game_input[1];
@@ -406,9 +535,6 @@ int CALLBACK WinMain(
 			int64_t last_cycle_count = __rdtsc();
 
 			while(Running) {
-
-
-
 				MSG Message;
 				while(PeekMessage(&Message, 0, 0, 0, PM_REMOVE)) {
 					if (Message.message == WM_QUIT) {
@@ -558,13 +684,15 @@ int CALLBACK WinMain(
         sound_buffer.sample_count = bytes_to_write / sound_output.bytes_per_sample;
         sound_buffer.samples = samples;
 
+
+        // Initialize screen buffer for the next frame
 				GameOffScreenBuffer game_offscreen_buffer = {};
 				game_offscreen_buffer.memory = GlobalBackBuffer.memory;
 				game_offscreen_buffer.width =  GlobalBackBuffer.width;
 				game_offscreen_buffer.height = GlobalBackBuffer.height;
 				game_offscreen_buffer.pitch = GlobalBackBuffer.pitch;
 
-				game_update_and_render(new_input, &game_offscreen_buffer, &sound_buffer);
+				game_update_and_render(&game_memory, new_input, &game_offscreen_buffer, &sound_buffer);
 
         if (is_sound_valid) {
 					Win32FillSoundBuffer(&sound_output, byte_to_lock, bytes_to_write, &sound_buffer);
