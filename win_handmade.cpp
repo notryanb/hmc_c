@@ -156,6 +156,14 @@ debug_platform_write_entire_file(char *file_name, uint32_t memory_size, void *me
   return(result);
 }
 
+static void 
+win32_process_keyboard_message(
+    GameButtonState *new_button_state,
+    bool is_down
+) {
+  new_button_state->ended_down = is_down;
+  ++new_button_state->half_transition_count;
+}
 
 
 static void 
@@ -400,6 +408,9 @@ LRESULT CALLBACK  Win32MainWindowCallback(
 		case WM_SYSKEYUP:
 		case WM_KEYDOWN:
 		case WM_KEYUP: {
+      // Might want to assert that keyboard input came in through a non-standard event
+      // so the following code can be moved.
+    /*
 			uint32 keycode = WParam;
 			bool was_down = ((LParam & (1 << 30)) != 0); // Get bit 30 of LParam
 			bool is_down = ((LParam & (1 << 31)) == 0); // Get bit 30 of LParam
@@ -419,16 +430,12 @@ LRESULT CALLBACK  Win32MainWindowCallback(
       } else if (keycode == VK_ESCAPE) {
       } else if (keycode == VK_SPACE) {
 			}
+    */
 		} break;
 		case WM_PAINT: {
 			PAINTSTRUCT Paint;
 			HDC device_context = BeginPaint(Window, &Paint);
 
-			int x = Paint.rcPaint.left;
-			int y = Paint.rcPaint.top;
-			int height = Paint.rcPaint.bottom - Paint.rcPaint.top;
-			int width = Paint.rcPaint.right - Paint.rcPaint.left;
-			
 			Win32WindowDimension dimension = GetWindowDimension(Window);
 			Win32DisplayBufferInWindow(
 				&GlobalBackBuffer,
@@ -447,6 +454,82 @@ LRESULT CALLBACK  Win32MainWindowCallback(
 	return(Result);
 };
 
+static void
+win32_process_pending_messages(GameControllerInput *keyboard_controller) {
+  MSG message;
+
+  while(PeekMessage(&message, 0, 0, 0, PM_REMOVE)) {
+    switch(message.message) {
+      case WM_QUIT: {
+        Running = false;
+        break;
+      }
+      case WM_SYSKEYDOWN:
+      case WM_SYSKEYUP:
+      case WM_KEYDOWN:
+      case WM_KEYUP: {
+        uint32_t keycode = (uint32_t)message.wParam;
+        bool was_down = ((message.lParam & (1 << 30)) != 0); // Get bit 30 of LParam
+        bool is_down = ((message.lParam & (1 << 31)) == 0); // Get bit 31 of LParam
+
+        if (was_down != is_down){
+          if (keycode == 'W') {
+          } else if (keycode == 'A') {
+          } else if (keycode == 'S') {
+          } else if (keycode == 'D') {
+          } else if (keycode == 'Q') {
+            win32_process_keyboard_message(
+              &keyboard_controller->left_shoulder,
+              is_down
+            );
+          } else if (keycode == 'E') {
+            win32_process_keyboard_message(
+              &keyboard_controller->right_shoulder,
+              is_down
+            );
+          } else if (keycode == VK_UP) {
+            win32_process_keyboard_message(
+              &keyboard_controller->up,
+              is_down
+            );
+          } else if (keycode == VK_LEFT) {
+            win32_process_keyboard_message(
+              &keyboard_controller->left,
+              is_down
+            );
+          } else if (keycode == VK_DOWN) {
+            win32_process_keyboard_message(
+              &keyboard_controller->down,
+              is_down
+            );
+          } else if (keycode == VK_RIGHT) {
+            win32_process_keyboard_message(
+              &keyboard_controller->right,
+              is_down
+            );
+          } else if (keycode == VK_ESCAPE) {
+            Running = false;
+          } else if (keycode == VK_SPACE) {
+          }
+        }
+
+        // Check for Alt+ F4 exit code
+        bool alt_key_was_down = (message.lParam & (1 << 29));
+        if ((keycode == VK_F4) && alt_key_was_down)
+        {
+          Running = false;
+        }
+      } break;
+
+      default: {
+        TranslateMessage(&message);	
+        DispatchMessageA(&message);
+        break;
+      }
+    }
+  }
+}
+
 
 int CALLBACK WinMain(
 	HINSTANCE Instance,
@@ -459,7 +542,6 @@ int CALLBACK WinMain(
 
 	WNDCLASSA WindowClass = {};
 
-	//Win32WindowDimension dimension = GetWindowDimension(Window);
 	Win32ResizeDIBSection(&GlobalBackBuffer, 1280, 720);
 
 	WindowClass.style = CS_CLASSDC | CS_HREDRAW | CS_VREDRAW;
@@ -529,21 +611,19 @@ int CALLBACK WinMain(
       GameInput *new_input = &game_input[0];
       GameInput *old_input = &game_input[1];
 
-
+      // Performance counting
 			LARGE_INTEGER last_counter;
 			QueryPerformanceCounter(&last_counter);
 			int64_t last_cycle_count = __rdtsc();
 
 			while(Running) {
-				MSG Message;
-				while(PeekMessage(&Message, 0, 0, 0, PM_REMOVE)) {
-					if (Message.message == WM_QUIT) {
-						Running = false;
-					}
+        GameControllerInput *keyboard_controller = &new_input->controllers[0];
 
-					TranslateMessage(&Message);	
-					DispatchMessageA(&Message);
-				}
+        // Reset button state between every loop
+        // Can't zero everything because the DOWN state will be wrong
+        GameControllerInput zeroed_controller = {};
+        *keyboard_controller = zeroed_controller;
+        win32_process_pending_messages(keyboard_controller);
 
         int max_controller_count = XUSER_MAX_COUNT;
         if(max_controller_count > ArrayCount(new_input->controllers)) {
@@ -570,6 +650,7 @@ int CALLBACK WinMain(
             new_controller->is_analog = true;
             new_controller->start_x = old_controller->end_x;
             new_controller->start_y = old_controller->end_y;
+
 
             // Normalize stick values between -1 and 1.
             float stick_x;

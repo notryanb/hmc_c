@@ -74,7 +74,7 @@ struct GameMemory {
 };
 
 struct GameInput {
-  GameControllerInput controllers[4];
+  GameControllerInput controllers[5];
 };
 
 
