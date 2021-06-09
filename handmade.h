@@ -33,31 +33,33 @@ struct GameButtonState {
 
 struct GameControllerInput {
   bool is_analog;
-
-  float start_x;
-  float start_y;
-  
-  float min_x;
-  float min_y;
- 
-  float max_x;
-  float max_y;
- 
-  float end_x;
-  float end_y;
+  bool is_connected;
+  float avg_stick_x;
+  float avg_stick_y;
 
   union {
-    GameButtonState buttons[6];
+    GameButtonState buttons[12];
     struct {
-      GameButtonState up;
-      GameButtonState down;
-      GameButtonState left;
-      GameButtonState right;
+      GameButtonState move_up;
+      GameButtonState move_down;
+      GameButtonState move_left;
+      GameButtonState move_right;
+      GameButtonState action_up;
+      GameButtonState action_down;
+      GameButtonState action_left;
+      GameButtonState action_right;
       GameButtonState left_shoulder;
       GameButtonState right_shoulder;
+      GameButtonState start;
+      GameButtonState back;
     };
   };
 };
+
+struct GameInput {
+  GameControllerInput controllers[5];
+};
+
 
 struct GameState {
   int tone_hz;
@@ -73,12 +75,15 @@ struct GameMemory {
   void *transient_storage;
 };
 
-struct GameInput {
-  GameControllerInput controllers[5];
-};
-
-
 // Fuctions
+
+// Gets the controller from the GameInput and asserts the controller index
+// is in bounds
+inline GameControllerInput *get_controller(GameInput *game_input, int controller_idx) {
+  // Assert(controller_idx < ArrayCount(game_input->controllers));
+  GameControllerInput *controller = &game_input->controllers[controller_idx];
+  return controller;
+}
 
 static void game_update_and_render(
     GameMemory *game_memory,

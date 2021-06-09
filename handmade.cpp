@@ -73,18 +73,32 @@ game_update_and_render(
     memory->is_initialized = true;
   }
 
-  GameControllerInput *input0 = &input->controllers[0];
+  for(int controller_idx = 0;
+      controller_idx < ArrayCount(input->controllers);
+      ++controller_idx) 
+  {
+    GameControllerInput *controller = &input->controllers[controller_idx];
+    
+    if(controller->is_analog) {
+      // TODO: Analog movement tuning
+      game_state->blue_offset += (int)(4.0f * (controller->avg_stick_x));
+      game_state->tone_hz = 256 + (int)(128.0f * (controller->avg_stick_y));
+    } else {
+      if (controller->move_left.ended_down) {
+        game_state->blue_offset -= 1;
+      }
+      
+      if (controller->move_right.ended_down) {
+        game_state->blue_offset += 1;
+      }
+      // TODO - Digital movement tuning
+    }
 
-  if(input0->is_analog) {
-    game_state->blue_offset += (int)(4.0f * (input0->end_x));
-    game_state->tone_hz = 256 + (int)(128.0f * (input0->end_y));
-  } else {
-
+    if(controller->action_down.ended_down) {
+      game_state->green_offset += 1;
+    }
   }
 
-  if(input0->down.ended_down) {
-    game_state->green_offset += 1;
-  }
 
   output_sound(sound_buffer, game_state->tone_hz);
 	render_weird_gradient(buffer, game_state->blue_offset, game_state->green_offset);
