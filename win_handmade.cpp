@@ -50,6 +50,7 @@ global_variable x_input_set_state *XInputSetState_ = XInputSetStateStub;
 global_variable bool Running = false;
 global_variable Win32OffScreenBuffer GlobalBackBuffer;
 global_variable LPDIRECTSOUNDBUFFER GlobalSecondarySoundBuffer;
+global_variable int64_t GlobalPerfCounterFrequency;
 
 static DebugFileReadResult
 debug_platform_read_entire_file(char *file_name) {
@@ -538,14 +539,32 @@ win32_process_input_stick_value(SHORT thumbstick, float deadzone_threshold) {
 }
 
 
+static float
+win32_get_seconds_elapsed(LARGE_INTEGER start, LARGE_INTEGER end) {
+  float delta = (float)end.QuadPart - (float)start.QuadPart;
+  float seconds_elapsed_for_work = delta / (float)GlobalPerfCounterFrequency;
+  return seconds_elapsed_for_work;
+}
+
+static LARGE_INTEGER
+win32_get_wall_clock(void) {
+  LARGE_INTEGER end_counter;
+  QueryPerformanceCounter(&end_counter);
+  return end_counter;
+}
+
 int CALLBACK WinMain(
 	HINSTANCE Instance,
 	HINSTANCE PrevInstance,
 	LPSTR lpCmdLine,
 	int nCmdShow
 ) {
-	LARGE_INTEGER perf_counter_frequency;
-	QueryPerformanceFrequency(&perf_counter_frequency);
+	LARGE_INTEGER perf_counter_frequency_result;
+	QueryPerformanceFrequency(&perf_counter_frequency_result);
+  GlobalPerfCounterFrequency = perf_counter_frequency_result.QuadPart;
+
+  // set OS thread sleep duration to 1ms
+  bool sleep_is_granular = timeBeginPeriod(1) == TIMERR_NOERROR;
 
 	WNDCLASSA WindowClass = {};
 
@@ -555,6 +574,11 @@ int CALLBACK WinMain(
 	WindowClass.lpfnWndProc = Win32MainWindowCallback;
 	WindowClass.hInstance = Instance;
 	WindowClass.lpszClassName = "HandmadeHeroWindowClass";
+
+  // Fixed frame timing: 30fps
+  int monitor_refresh_rate = 60;
+  int game_update_hz = monitor_refresh_rate / 2;
+  float target_seconds_elapsed_per_frame = 1.0f / (float)game_update_hz;
 
 	/* takes pointer to WindowClass */
 	if (RegisterClass(&WindowClass)) {
@@ -574,6 +598,8 @@ int CALLBACK WinMain(
 		);
 
 		if (window) {
+		  HDC device_context = GetDC(window);
+
 			Win32SoundOutput sound_output = {};
 			sound_output.samples_per_second = 48000;
 			sound_output.running_sample_index = 0;
@@ -619,8 +645,7 @@ int CALLBACK WinMain(
       GameInput *old_input = &game_input[1];
 
       // Performance counting
-			LARGE_INTEGER last_counter;
-			QueryPerformanceCounter(&last_counter);
+      LARGE_INTEGER last_counter = win32_get_wall_clock();
 			int64_t last_cycle_count = __rdtsc();
 
 			while(Running) {
@@ -838,7 +863,29 @@ int CALLBACK WinMain(
 					Win32FillSoundBuffer(&sound_output, byte_to_lock, bytes_to_write, &sound_buffer);
         }
 
-				HDC device_context = GetDC(window);
+
+        // compute target FPS
+        LARGE_INTEGER work_counter = win32_get_wall_clock();
+        float seconds_elapsed_for_work = win32_get_seconds_elapsed(last_counter, work_counter);
+        float seconds_elapsed_for_frame = seconds_elapsed_for_work;
+        if (seconds_elapsed_for_frame < target_seconds_elapsed_per_frame) {
+          while (seconds_elapsed_for_frame < target_seconds_elapsed_per_frame) {
+            if (sleep_is_granular) {
+              DWORD sleep_ms = (DWORD)(1000.0f * 
+                (target_seconds_elapsed_per_frame - seconds_elapsed_for_frame));
+
+              if (sleep_ms > 0) {
+                Sleep(sleep_ms);
+              }
+            }
+            seconds_elapsed_for_frame = win32_get_seconds_elapsed(last_counter, win32_get_wall_clock());
+          }
+        } else {
+          // TODO: Missed frame rate, need to log
+
+        }
+
+        // Blit to screen after frame rate calculations
 				Win32WindowDimension dimension = GetWindowDimension(window);
 
 				Win32DisplayBufferInWindow(
@@ -847,20 +894,18 @@ int CALLBACK WinMain(
 					dimension.width,
 					dimension.height
 				);
+        
+				//ReleaseDC(window, device_context);
 
-				ReleaseDC(window, device_context);
-
-				int64_t end_cycle_count = __rdtsc();
-				int64_t elapsed_cycles = end_cycle_count - last_cycle_count;
-
-				LARGE_INTEGER end_counter;
-				QueryPerformanceCounter(&end_counter);
-
-				int64_t elapsed_counter = end_counter.QuadPart - last_counter.QuadPart;
+        /*
+         * Used for debug FPS
 				int32_t elapsed_millis = (int32_t)((1000 * elapsed_counter) / perf_counter_frequency.QuadPart);
 				int32_t fps = perf_counter_frequency.QuadPart / elapsed_counter;
 				int32_t mega_cycles_per_frame = (int32_t)(elapsed_cycles / (1000 * 1000));
+        */
 
+        /*
+         * Used for Debug FPS
 				char string_buffer[256];
 				wsprintf(
 					string_buffer, 
@@ -870,15 +915,19 @@ int CALLBACK WinMain(
 					mega_cycles_per_frame
 				);
 				OutputDebugStringA(string_buffer);
-
-
-				// Close time window
-				last_cycle_count = end_cycle_count;
-				last_counter = end_counter;
+        */
 
         GameInput *temp = new_input;
         new_input = old_input;
         old_input = temp;
+
+				// Close time window
+        LARGE_INTEGER end_counter = win32_get_wall_clock();
+				last_counter = end_counter;
+				
+        int64_t end_cycle_count = __rdtsc();
+				int64_t elapsed_cycles = end_cycle_count - last_cycle_count;
+				last_cycle_count = end_cycle_count;
 			}
 
 		} else {
