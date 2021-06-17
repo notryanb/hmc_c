@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <stdint.h> // Bring in unit8_t to avoid casting to (unsigned char *)
+#include <stdio.h> // for _snprintf_s logging
 #include <xinput.h> // Device input like joypads
 #include <dsound.h>
 #include <math.h>
@@ -526,6 +527,93 @@ win32_process_pending_messages(GameControllerInput *keyboard_controller) {
   }
 }
 
+
+
+// Draws a vertical tic-mark at the x position between two y positions in the buffer.
+// Kind of like a line, but not exactly.
+static void
+win32_debug_draw_vertical(
+    Win32OffScreenBuffer *back_buffer, 
+    int x, 
+    int top, 
+    int bottom,
+    uint32_t color
+  ) {
+  uint8_t *pixel =  (uint8_t *)back_buffer->memory + 
+      (x * back_buffer->bytes_per_pixel) + 
+      (top * back_buffer->pitch);
+
+  for(int y = top; y < bottom; ++y) 
+  {
+    *(uint32_t *)pixel = color; 
+    pixel += back_buffer->pitch;
+  }
+}
+
+// Draws a line for a sound cursor at a given x.
+inline void
+win32_draw_sound_buffer_line(
+  Win32OffScreenBuffer *back_buffer,
+  Win32SoundOutput *sound_output,
+  float coefficient,
+  int pad_x, 
+  int top,
+  int bottom,
+  DWORD cursor_pos,
+  uint32_t color
+) {
+    float x = coefficient * (float)cursor_pos;
+    int x_with_pad = pad_x + (int)x;
+    win32_debug_draw_vertical(back_buffer, x_with_pad, top, bottom, color);
+}
+
+// Draw lines where sound play and write cursors occur
+static void
+win32_debug_sync_display(
+  Win32OffScreenBuffer *back_buffer,
+  int sound_cursor_count,
+  Win32DebugSoundCursor *debug_sound_cursors,
+  Win32SoundOutput *sound_output,
+  float target_seconds_per_frame
+) {
+  int pad_x = 16;
+  int pad_y = 16;
+  int top = pad_y;
+  int bottom = back_buffer->height - pad_y;
+
+  // Maps sound buffer position to video pixels with some padding 
+  float coefficient = (float)(back_buffer->width - 2 * pad_x) / (float)sound_output->secondary_buffer_size;
+
+  for(int sound_cursor_idx = 0;
+      sound_cursor_idx < sound_cursor_count;
+      ++sound_cursor_idx) 
+  {
+    Win32DebugSoundCursor *current_sound_cursor = &debug_sound_cursors[sound_cursor_idx];
+    
+    win32_draw_sound_buffer_line(
+        back_buffer, 
+        sound_output, 
+        coefficient, 
+        pad_x, 
+        top, 
+        bottom, 
+        current_sound_cursor->play_cursor,
+        0xFFFFFFFF
+    );
+
+    win32_draw_sound_buffer_line(
+        back_buffer, 
+        sound_output, 
+        coefficient, 
+        pad_x, 
+        top, 
+        bottom, 
+        current_sound_cursor->write_cursor,
+        0xFFFF0000
+    );
+  }
+}
+
 static float
 win32_process_input_stick_value(SHORT thumbstick, float deadzone_threshold) {
   float result = 0;
@@ -541,16 +629,16 @@ win32_process_input_stick_value(SHORT thumbstick, float deadzone_threshold) {
 
 static float
 win32_get_seconds_elapsed(LARGE_INTEGER start, LARGE_INTEGER end) {
-  float delta = (float)end.QuadPart - (float)start.QuadPart;
-  float seconds_elapsed_for_work = delta / (float)GlobalPerfCounterFrequency;
-  return seconds_elapsed_for_work;
+  float delta = (float)(end.QuadPart - start.QuadPart);
+  float elapsed_seconds = delta / (float)GlobalPerfCounterFrequency;
+  return elapsed_seconds;
 }
 
 static LARGE_INTEGER
 win32_get_wall_clock(void) {
-  LARGE_INTEGER end_counter;
-  QueryPerformanceCounter(&end_counter);
-  return end_counter;
+  LARGE_INTEGER counter;
+  QueryPerformanceCounter(&counter);
+  return counter;
 }
 
 int CALLBACK WinMain(
@@ -576,9 +664,12 @@ int CALLBACK WinMain(
 	WindowClass.lpszClassName = "HandmadeHeroWindowClass";
 
   // Fixed frame timing: 30fps
-  int monitor_refresh_rate = 60;
-  int game_update_hz = monitor_refresh_rate / 2;
-  float target_seconds_elapsed_per_frame = 1.0f / (float)game_update_hz;
+  //int monitor_refresh_rate = 60;
+  //int game_update_hz = monitor_refresh_rate / 2;
+#define monitor_refresh_rate 60
+#define frames_of_audio_latency 4
+#define game_update_hz (monitor_refresh_rate / 2)
+  float target_seconds_per_frame = 1.0f / (float)game_update_hz;
 
 	/* takes pointer to WindowClass */
 	if (RegisterClass(&WindowClass)) {
@@ -605,7 +696,9 @@ int CALLBACK WinMain(
 			sound_output.running_sample_index = 0;
 			sound_output.bytes_per_sample = sizeof(int16_t) * 2;
 			sound_output.secondary_buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample;
-      sound_output.latency_sample_count = sound_output.samples_per_second / 15;
+      //sound_output.latency_sample_count = sound_output.samples_per_second / 15;
+      sound_output.latency_sample_count = frames_of_audio_latency * 
+        (sound_output.samples_per_second / game_update_hz);
 
 			Win32InitDirectSound(window, sound_output.samples_per_second, sound_output.secondary_buffer_size);
       Win32ClearSoundBuffer(&sound_output);
@@ -638,6 +731,11 @@ int CALLBACK WinMain(
         PAGE_READWRITE
       );
 
+      // Initialize sound cursor tracking
+      int debug_sound_cursor_idx = 0;
+      Win32DebugSoundCursor debug_sound_cursors[game_update_hz / 2] = {0};
+      bool sound_is_valid = false;
+      DWORD last_play_cursor = 0;
 
       // Initialize Controllers
       GameInput game_input[2] = {};
@@ -814,21 +912,13 @@ int CALLBACK WinMain(
         DWORD byte_to_lock;
         DWORD target_cursor;
         DWORD bytes_to_write;
-				DWORD play_cursor;
-				DWORD write_cursor;
-        bool is_sound_valid = false;
 
-        HRESULT position_result = GlobalSecondarySoundBuffer->GetCurrentPosition(
-					&play_cursor,
-					&write_cursor
-				);
-
-				if(SUCCEEDED(position_result)) {
+				if (sound_is_valid) {
 					byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % 
               sound_output.secondary_buffer_size;
 
           target_cursor = 
-            ((play_cursor +
+            ((last_play_cursor +
               (sound_output.latency_sample_count * sound_output.bytes_per_sample)) %
               sound_output.secondary_buffer_size);
 				
@@ -838,8 +928,6 @@ int CALLBACK WinMain(
 					} else {
 						bytes_to_write = target_cursor - byte_to_lock;
 					}
-
-          is_sound_valid = true;
 				}
         
         // Set sample count based on frame-rate of the game to try and keep
@@ -859,34 +947,48 @@ int CALLBACK WinMain(
 
 				game_update_and_render(&game_memory, new_input, &game_offscreen_buffer, &sound_buffer);
 
-        if (is_sound_valid) {
+        if (sound_is_valid) {
 					Win32FillSoundBuffer(&sound_output, byte_to_lock, bytes_to_write, &sound_buffer);
         }
-
 
         // compute target FPS
         LARGE_INTEGER work_counter = win32_get_wall_clock();
         float seconds_elapsed_for_work = win32_get_seconds_elapsed(last_counter, work_counter);
         float seconds_elapsed_for_frame = seconds_elapsed_for_work;
-        if (seconds_elapsed_for_frame < target_seconds_elapsed_per_frame) {
-          while (seconds_elapsed_for_frame < target_seconds_elapsed_per_frame) {
+
+        if (seconds_elapsed_for_frame < target_seconds_per_frame) {
+          while (seconds_elapsed_for_frame < target_seconds_per_frame) {
             if (sleep_is_granular) {
               DWORD sleep_ms = (DWORD)(1000.0f * 
-                (target_seconds_elapsed_per_frame - seconds_elapsed_for_frame));
+                (target_seconds_per_frame - seconds_elapsed_for_frame));
 
               if (sleep_ms > 0) {
                 Sleep(sleep_ms);
               }
             }
-            seconds_elapsed_for_frame = win32_get_seconds_elapsed(last_counter, win32_get_wall_clock());
+            while(seconds_elapsed_for_frame < target_seconds_per_frame) {
+              seconds_elapsed_for_frame = win32_get_seconds_elapsed(last_counter, win32_get_wall_clock());
+            }
           }
         } else {
           // TODO: Missed frame rate, need to log
-
         }
+        
+				// Close time window
+        LARGE_INTEGER end_counter = win32_get_wall_clock();
+        float ms_per_frame = 1000.0f * win32_get_seconds_elapsed(last_counter, end_counter);
+				last_counter = end_counter;
 
         // Blit to screen after frame rate calculations
 				Win32WindowDimension dimension = GetWindowDimension(window);
+
+        win32_debug_sync_display(
+          &GlobalBackBuffer,
+          ArrayCount(debug_sound_cursors),
+          debug_sound_cursors,
+          &sound_output,
+          target_seconds_per_frame
+        );
 
 				Win32DisplayBufferInWindow(
 					&GlobalBackBuffer,
@@ -894,40 +996,59 @@ int CALLBACK WinMain(
 					dimension.width,
 					dimension.height
 				);
-        
+
 				//ReleaseDC(window, device_context);
+        
+        DWORD play_cursor;
+        DWORD write_cursor;
+        HRESULT sound_buffer_position_result = GlobalSecondarySoundBuffer->GetCurrentPosition(
+          &play_cursor,
+          &write_cursor
+        );
 
-        /*
-         * Used for debug FPS
-				int32_t elapsed_millis = (int32_t)((1000 * elapsed_counter) / perf_counter_frequency.QuadPart);
-				int32_t fps = perf_counter_frequency.QuadPart / elapsed_counter;
-				int32_t mega_cycles_per_frame = (int32_t)(elapsed_cycles / (1000 * 1000));
-        */
+        if (SUCCEEDED(sound_buffer_position_result)) {
+          last_play_cursor = play_cursor;
 
-        /*
-         * Used for Debug FPS
-				char string_buffer[256];
-				wsprintf(
-					string_buffer, 
-					"%dms/frame, %dfps, %dMc/f\n", 
-					elapsed_millis,
-					fps,
-					mega_cycles_per_frame
-				);
-				OutputDebugStringA(string_buffer);
-        */
+          if (!sound_is_valid) {
+            sound_output.running_sample_index = write_cursor / sound_output.bytes_per_sample;
+            sound_is_valid = true;
+          }
+        } else {
+          sound_is_valid = false;
+        }
+
+        Win32DebugSoundCursor *debug_sound_cursor = &debug_sound_cursors[debug_sound_cursor_idx++];
+
+        if (debug_sound_cursor_idx > ArrayCount(debug_sound_cursors)) {
+          debug_sound_cursor_idx = 0;
+        }
+
+        debug_sound_cursor->play_cursor = play_cursor;
+        debug_sound_cursor->write_cursor = write_cursor;
 
         GameInput *temp = new_input;
         new_input = old_input;
         old_input = temp;
 
-				// Close time window
-        LARGE_INTEGER end_counter = win32_get_wall_clock();
-				last_counter = end_counter;
-				
         int64_t end_cycle_count = __rdtsc();
 				int64_t elapsed_cycles = end_cycle_count - last_cycle_count;
 				last_cycle_count = end_cycle_count;
+       
+				//int32_t elapsed_millis = (int32_t)((1000 * elapsed_counter) / perf_counter_frequency.QuadPart);
+        //int32_t fps = perf_counter_frequency.QuadPart / elapsed_counter;
+        float fps = 0.0f;
+				double mega_cycles_per_frame = (float)(elapsed_cycles / (1000.0f * 1000.0f));
+
+				char string_buffer[256];
+				_snprintf_s(
+					string_buffer, 
+          sizeof(string_buffer),
+					"%.02fms/frame, %.02ffps, %.02fMc/f\n", 
+					ms_per_frame,
+					fps,
+					mega_cycles_per_frame
+				);
+				OutputDebugStringA(string_buffer);
 			}
 
 		} else {
@@ -939,6 +1060,4 @@ int CALLBACK WinMain(
 	
 	return(0);
 }
-
-
 
