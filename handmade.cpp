@@ -39,6 +39,9 @@ output_sound(GameSoundOutputBuffer *sound_buffer, int toneHz) {
 			*sample_out++ = sample_value;
 
       tSine += 2.0f * Pi32 * (1.0f / (float)wave_period);
+      if (tSine > 2.0f * Pi32) {
+        tSine -= 2.0f * Pi32;
+      }
 		}
 }
 
@@ -46,12 +49,12 @@ static void
 game_update_and_render(
     GameMemory *memory,
     GameInput *input,
-    GameOffScreenBuffer *buffer, 
-    GameSoundOutputBuffer *sound_buffer
+    GameOffScreenBuffer *buffer
 ) {
   GameState *game_state = (GameState *)memory->permanent_storage;
 
   if (!memory->is_initialized) {
+    /* Debug file reading/writing
     char *file_name = "D:/Programming/handmade_hero/README.md";
     DebugFileReadResult file_result = debug_platform_read_entire_file(file_name);
 
@@ -64,6 +67,7 @@ game_update_and_render(
 
       debug_platform_free_file_memory(file_result.contents);
     }
+    */
 
 
     game_state->blue_offset = 0;
@@ -99,7 +103,16 @@ game_update_and_render(
     }
   }
 
-
-  output_sound(sound_buffer, game_state->tone_hz);
 	render_weird_gradient(buffer, game_state->blue_offset, game_state->green_offset);
 };
+
+
+static void game_get_sound_samples(
+    GameMemory *game_memory,
+    GameSoundOutputBuffer *sound_buffer
+) {
+  GameState *game_state = (GameState *)game_memory->permanent_storage;
+  output_sound(sound_buffer, game_state->tone_hz);
+
+}
+

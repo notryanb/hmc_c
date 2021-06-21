@@ -539,14 +539,24 @@ win32_debug_draw_vertical(
     int bottom,
     uint32_t color
   ) {
-  uint8_t *pixel =  (uint8_t *)back_buffer->memory + 
-      (x * back_buffer->bytes_per_pixel) + 
-      (top * back_buffer->pitch);
+  if (top <= 0) {
+    top = 0;
+  }
+  
+  if (bottom >= back_buffer->height) {
+    bottom = back_buffer->height;
+  }
 
-  for(int y = top; y < bottom; ++y) 
-  {
-    *(uint32_t *)pixel = color; 
-    pixel += back_buffer->pitch;
+  if (x >=0 && x < back_buffer->width) {
+    uint8_t *pixel =  (uint8_t *)back_buffer->memory + 
+        (x * back_buffer->bytes_per_pixel) + 
+        (top * back_buffer->pitch);
+
+    for(int y = top; y < bottom; ++y) 
+    {
+      *(uint32_t *)pixel = color; 
+      pixel += back_buffer->pitch;
+    }
   }
 }
 
@@ -572,14 +582,15 @@ static void
 win32_debug_sync_display(
   Win32OffScreenBuffer *back_buffer,
   int sound_cursor_count,
+  int current_cursor_index,
   Win32DebugSoundCursor *debug_sound_cursors,
   Win32SoundOutput *sound_output,
   float target_seconds_per_frame
 ) {
+
   int pad_x = 16;
   int pad_y = 16;
-  int top = pad_y;
-  int bottom = back_buffer->height - pad_y;
+  int line_height = 64;
 
   // Maps sound buffer position to video pixels with some padding 
   float coefficient = (float)(back_buffer->width - 2 * pad_x) / (float)sound_output->secondary_buffer_size;
@@ -589,7 +600,67 @@ win32_debug_sync_display(
       ++sound_cursor_idx) 
   {
     Win32DebugSoundCursor *current_sound_cursor = &debug_sound_cursors[sound_cursor_idx];
-    
+
+    DWORD play_color = 0xFFFFFFFF;
+    DWORD write_color = 0xFFFF0000;
+
+    int top = pad_y;
+    int bottom = pad_y + line_height;
+    if (sound_cursor_idx == current_cursor_index) {
+      top += pad_y + line_height;
+      bottom += pad_y + line_height;
+
+      win32_draw_sound_buffer_line(
+          back_buffer, 
+          sound_output, 
+          coefficient, 
+          pad_x, 
+          top, 
+          bottom, 
+          current_sound_cursor->output_play_cursor,
+          play_color
+      );
+
+      win32_draw_sound_buffer_line(
+          back_buffer, 
+          sound_output, 
+          coefficient, 
+          pad_x, 
+          top, 
+          bottom, 
+          current_sound_cursor->output_write_cursor,
+          write_color
+      );
+
+      top += pad_y + line_height;
+      bottom += pad_y + line_height;
+
+      win32_draw_sound_buffer_line(
+          back_buffer, 
+          sound_output, 
+          coefficient, 
+          pad_x, 
+          top, 
+          bottom, 
+          current_sound_cursor->output_location,
+          play_color
+      );
+
+      win32_draw_sound_buffer_line(
+          back_buffer, 
+          sound_output, 
+          coefficient, 
+          pad_x, 
+          top, 
+          bottom, 
+          current_sound_cursor->output_location + current_sound_cursor->output_byte_count,
+          write_color
+      );
+      
+      top += pad_y + line_height;
+      bottom += pad_y + line_height;
+    }
+       
     win32_draw_sound_buffer_line(
         back_buffer, 
         sound_output, 
@@ -597,8 +668,8 @@ win32_debug_sync_display(
         pad_x, 
         top, 
         bottom, 
-        current_sound_cursor->play_cursor,
-        0xFFFFFFFF
+        current_sound_cursor->flip_play_cursor,
+        play_color
     );
 
     win32_draw_sound_buffer_line(
@@ -608,8 +679,8 @@ win32_debug_sync_display(
         pad_x, 
         top, 
         bottom, 
-        current_sound_cursor->write_cursor,
-        0xFFFF0000
+        current_sound_cursor->flip_write_cursor,
+        write_color
     );
   }
 }
@@ -667,7 +738,7 @@ int CALLBACK WinMain(
   //int monitor_refresh_rate = 60;
   //int game_update_hz = monitor_refresh_rate / 2;
 #define monitor_refresh_rate 60
-#define frames_of_audio_latency 4
+//#define frames_of_audio_latency 4
 #define game_update_hz (monitor_refresh_rate / 2)
   float target_seconds_per_frame = 1.0f / (float)game_update_hz;
 
@@ -695,10 +766,11 @@ int CALLBACK WinMain(
 			sound_output.samples_per_second = 48000;
 			sound_output.running_sample_index = 0;
 			sound_output.bytes_per_sample = sizeof(int16_t) * 2;
+      sound_output.safety_bytes = (sound_output.samples_per_second * 
+          sound_output.bytes_per_sample / 
+          game_update_hz / 4);
 			sound_output.secondary_buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample;
-      //sound_output.latency_sample_count = sound_output.samples_per_second / 15;
-      sound_output.latency_sample_count = frames_of_audio_latency * 
-        (sound_output.samples_per_second / game_update_hz);
+      sound_output.latency_sample_count = sound_output.samples_per_second / game_update_hz;
 
 			Win32InitDirectSound(window, sound_output.samples_per_second, sound_output.secondary_buffer_size);
       Win32ClearSoundBuffer(&sound_output);
@@ -734,8 +806,9 @@ int CALLBACK WinMain(
       // Initialize sound cursor tracking
       int debug_sound_cursor_idx = 0;
       Win32DebugSoundCursor debug_sound_cursors[game_update_hz / 2] = {0};
+      DWORD audio_latency_bytes = 0;
+      float audio_latency_seconds = 0.0f;
       bool sound_is_valid = false;
-      DWORD last_play_cursor = 0;
 
       // Initialize Controllers
       GameInput game_input[2] = {};
@@ -745,6 +818,7 @@ int CALLBACK WinMain(
       // Performance counting
       LARGE_INTEGER last_counter = win32_get_wall_clock();
 			int64_t last_cycle_count = __rdtsc();
+      LARGE_INTEGER flip_wall_clock = win32_get_wall_clock();
 
 			while(Running) {
         GameControllerInput *old_keyboard_controller = &old_input->controllers[0];
@@ -908,48 +982,116 @@ int CALLBACK WinMain(
 				XInputSetState(0, &Vibration);
         */
 
-        // Start setting up sound buffer
-        DWORD byte_to_lock;
-        DWORD target_cursor;
-        DWORD bytes_to_write;
-
-				if (sound_is_valid) {
-					byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % 
-              sound_output.secondary_buffer_size;
-
-          target_cursor = 
-            ((last_play_cursor +
-              (sound_output.latency_sample_count * sound_output.bytes_per_sample)) %
-              sound_output.secondary_buffer_size);
-				
-					if(byte_to_lock > target_cursor) {
-						bytes_to_write = sound_output.secondary_buffer_size - byte_to_lock;
-						bytes_to_write += target_cursor;
-					} else {
-						bytes_to_write = target_cursor - byte_to_lock;
-					}
-				}
         
-        // Set sample count based on frame-rate of the game to try and keep
-        // sounds in sync with visuals
-        GameSoundOutputBuffer sound_buffer = {};
-        sound_buffer.samples_per_second = sound_output.samples_per_second;
-        sound_buffer.sample_count = bytes_to_write / sound_output.bytes_per_sample;
-        sound_buffer.samples = samples;
-
-
         // Initialize screen buffer for the next frame
 				GameOffScreenBuffer game_offscreen_buffer = {};
 				game_offscreen_buffer.memory = GlobalBackBuffer.memory;
 				game_offscreen_buffer.width =  GlobalBackBuffer.width;
 				game_offscreen_buffer.height = GlobalBackBuffer.height;
 				game_offscreen_buffer.pitch = GlobalBackBuffer.pitch;
+				game_update_and_render(&game_memory, new_input, &game_offscreen_buffer);
 
-				game_update_and_render(&game_memory, new_input, &game_offscreen_buffer, &sound_buffer);
+       
 
-        if (sound_is_valid) {
-					Win32FillSoundBuffer(&sound_output, byte_to_lock, bytes_to_write, &sound_buffer);
+        // Start setting up sound buffer
+        // Compensate for sound cards with different latencies.
+        // Look at how far away the write cursor is away from the play cursor
+        // as well as where in the frame the cursors are. Decide to write
+        // to the next frame boundary or further ahead with some safety margin
+        // past the next frame boundary.
+        LARGE_INTEGER audio_wall_clock = win32_get_wall_clock();
+        float frame_begin_audio_seconds_delta = win32_get_seconds_elapsed(flip_wall_clock, audio_wall_clock);
+        DWORD play_cursor;
+        DWORD write_cursor;
+        HRESULT sound_buffer_position_result = GlobalSecondarySoundBuffer->GetCurrentPosition(
+          &play_cursor,
+          &write_cursor
+        );
+
+        if (SUCCEEDED(sound_buffer_position_result)) {
+
+          if (!sound_is_valid) {
+            sound_output.running_sample_index = write_cursor / sound_output.bytes_per_sample;
+            sound_is_valid = true;
+          }
+
+					DWORD byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % 
+              sound_output.secondary_buffer_size;
+
+          DWORD expected_sound_bytes_per_frame = (sound_output.samples_per_second *
+            sound_output.bytes_per_sample) / game_update_hz;
+          
+          float seconds_left_until_flip = target_seconds_per_frame - frame_begin_audio_seconds_delta;
+          float audio_frame_ratio = seconds_left_until_flip / target_seconds_per_frame;
+
+          /*
+          float expected_bytes_until_flip = 
+              (seconds_left_until_flip / target_seconds_per_frame) * 
+              (float)expected_sound_bytes_per_frame;
+          */
+
+          DWORD expected_bytes_until_flip = (DWORD)(
+              (seconds_left_until_flip / target_seconds_per_frame) * 
+              (float)expected_sound_bytes_per_frame);
+
+          DWORD expected_frame_boundary_byte = play_cursor + expected_sound_bytes_per_frame;
+          DWORD safe_write_cursor = write_cursor + sound_output.safety_bytes;
+          bool audio_card_is_latent = safe_write_cursor >= expected_frame_boundary_byte;
+          DWORD target_cursor = 0;
+
+          if (audio_card_is_latent) {
+            target_cursor = safe_write_cursor + expected_sound_bytes_per_frame;
+          } else {
+            target_cursor = expected_frame_boundary_byte + expected_sound_bytes_per_frame;
+          }
+
+          target_cursor = target_cursor % sound_output.secondary_buffer_size;
+
+
+          DWORD bytes_to_write = 0;
+					if(byte_to_lock > target_cursor) {
+						bytes_to_write = sound_output.secondary_buffer_size - byte_to_lock;
+						bytes_to_write += target_cursor;
+					} else {
+						bytes_to_write = target_cursor - byte_to_lock;
+					}
+
+          // Set sample count based on frame-rate of the game to try and keep
+          // sounds in sync with visuals
+          GameSoundOutputBuffer sound_buffer = {};
+          sound_buffer.samples_per_second = sound_output.samples_per_second;
+          sound_buffer.sample_count = bytes_to_write / sound_output.bytes_per_sample;
+          sound_buffer.samples = samples;
+          game_get_sound_samples(&game_memory, &sound_buffer);
+
+          // Debug Sound stuff
+          Win32DebugSoundCursor *sound_cursor = &debug_sound_cursors[debug_sound_cursor_idx];
+          sound_cursor->output_play_cursor = play_cursor;
+          sound_cursor->output_write_cursor = write_cursor;
+          sound_cursor->output_location = byte_to_lock;
+          sound_cursor->output_byte_count = bytes_to_write;
+          sound_cursor->expected_flip_play_cursor = expected_frame_boundary_byte;
+
+          DWORD unwrapped_write_cursor = write_cursor;
+
+          // Add buffer size when write cursor wraps around and is behind the play cursor
+          if (unwrapped_write_cursor < play_cursor) {
+            unwrapped_write_cursor += sound_output.secondary_buffer_size;
+          }
+          audio_latency_bytes = unwrapped_write_cursor - play_cursor;
+          float samples_between_cursors = (float)audio_latency_bytes / (float)sound_output.bytes_per_sample;
+          audio_latency_seconds = samples_between_cursors / (float)sound_output.samples_per_second;
+          // End Debug Sound Stuff
+
+          Win32FillSoundBuffer(&sound_output, byte_to_lock, bytes_to_write, &sound_buffer);
+        } else {
+          sound_is_valid = false;
         }
+
+        
+
+
+
 
         // compute target FPS
         LARGE_INTEGER work_counter = win32_get_wall_clock();
@@ -985,6 +1127,7 @@ int CALLBACK WinMain(
         win32_debug_sync_display(
           &GlobalBackBuffer,
           ArrayCount(debug_sound_cursors),
+          debug_sound_cursor_idx - 1, // TODO: This is wrong when the current index is 0
           debug_sound_cursors,
           &sound_output,
           target_seconds_per_frame
@@ -996,19 +1139,17 @@ int CALLBACK WinMain(
 					dimension.width,
 					dimension.height
 				);
-
-				//ReleaseDC(window, device_context);
         
-        DWORD play_cursor;
-        DWORD write_cursor;
-        HRESULT sound_buffer_position_result = GlobalSecondarySoundBuffer->GetCurrentPosition(
+        flip_wall_clock = win32_get_wall_clock();
+
+        //For debugging sound cursors
+        sound_buffer_position_result = GlobalSecondarySoundBuffer->GetCurrentPosition(
           &play_cursor,
           &write_cursor
         );
+        
 
         if (SUCCEEDED(sound_buffer_position_result)) {
-          last_play_cursor = play_cursor;
-
           if (!sound_is_valid) {
             sound_output.running_sample_index = write_cursor / sound_output.bytes_per_sample;
             sound_is_valid = true;
@@ -1017,14 +1158,12 @@ int CALLBACK WinMain(
           sound_is_valid = false;
         }
 
-        Win32DebugSoundCursor *debug_sound_cursor = &debug_sound_cursors[debug_sound_cursor_idx++];
+        Win32DebugSoundCursor *debug_sound_cursor = &debug_sound_cursors[debug_sound_cursor_idx];
 
-        if (debug_sound_cursor_idx > ArrayCount(debug_sound_cursors)) {
-          debug_sound_cursor_idx = 0;
-        }
+        debug_sound_cursor->flip_play_cursor = play_cursor;
+        debug_sound_cursor->flip_write_cursor = write_cursor;
 
-        debug_sound_cursor->play_cursor = play_cursor;
-        debug_sound_cursor->write_cursor = write_cursor;
+        // End debugging sound cursors
 
         GameInput *temp = new_input;
         new_input = old_input;
@@ -1049,6 +1188,13 @@ int CALLBACK WinMain(
 					mega_cycles_per_frame
 				);
 				OutputDebugStringA(string_buffer);
+
+        // debug sound cursors
+        ++debug_sound_cursor_idx;
+        if (debug_sound_cursor_idx >= ArrayCount(debug_sound_cursors)) {
+          debug_sound_cursor_idx = 0;
+        }
+        // end debug sound cursors
 			}
 
 		} else {

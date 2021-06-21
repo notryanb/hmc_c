@@ -88,10 +88,13 @@ inline GameControllerInput *get_controller(GameInput *game_input, int controller
 static void game_update_and_render(
     GameMemory *game_memory,
     GameInput *game_input,
-    GameOffScreenBuffer *buffer,
-    GameSoundOutputBuffer *sound_buffer
+    GameOffScreenBuffer *buffer
 );
 
+static void game_get_sound_samples(
+    GameMemory *game_memory,
+    GameSoundOutputBuffer *sound_buffer
+);
 
 #define HANDMADE_H
 #endif
