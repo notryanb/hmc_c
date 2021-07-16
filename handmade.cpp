@@ -25,32 +25,28 @@ render_weird_gradient(GameOffScreenBuffer *buffer, int x_offset, int y_offset) {
 }
 
 static void 
-output_sound(GameSoundOutputBuffer *sound_buffer, int toneHz) {
-    static float tSine; 
+output_sound(GameState *game_state, GameSoundOutputBuffer *sound_buffer, int toneHz) {
     int16_t tone_volume = 3000;
     int wave_period = sound_buffer->samples_per_second / toneHz;
 
 		int16_t *sample_out = sound_buffer->samples;
 
 		for(int sample_index = 0; sample_index < sound_buffer->sample_count; ++sample_index) {
-			float sine_value = sinf(tSine);
+			float sine_value = sinf(game_state->sine);
 			int16_t sample_value = (int16)(sine_value * tone_volume);
 			*sample_out++ = sample_value;
 			*sample_out++ = sample_value;
 
-      tSine += 2.0f * Pi32 * (1.0f / (float)wave_period);
-      if (tSine > 2.0f * Pi32) {
-        tSine -= 2.0f * Pi32;
+      game_state->sine += 2.0f * Pi32 * (1.0f / (float)wave_period);
+      if (game_state->sine > 2.0f * Pi32) {
+        game_state->sine -= 2.0f * Pi32;
       }
 		}
 }
 
-static void 
-game_update_and_render(
-    GameMemory *memory,
-    GameInput *input,
-    GameOffScreenBuffer *buffer
-) {
+// the declspec ensures this function is exported in the DLL
+extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render)
+{
   GameState *game_state = (GameState *)memory->permanent_storage;
 
   if (!memory->is_initialized) {
@@ -73,6 +69,7 @@ game_update_and_render(
     game_state->blue_offset = 0;
     game_state->green_offset = 0;
     game_state->tone_hz = 256;
+    game_state->sine = 0.0f;
 
     memory->is_initialized = true;
   }
@@ -107,12 +104,9 @@ game_update_and_render(
 };
 
 
-static void game_get_sound_samples(
-    GameMemory *game_memory,
-    GameSoundOutputBuffer *sound_buffer
-) {
+extern "C" __declspec(dllexport) GAME_GET_SOUND_SAMPLES(game_get_sound_samples)
+{
   GameState *game_state = (GameState *)game_memory->permanent_storage;
-  output_sound(sound_buffer, game_state->tone_hz);
-
+  output_sound(game_state, sound_buffer, game_state->tone_hz);
 }
 

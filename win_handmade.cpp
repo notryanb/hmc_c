@@ -1,33 +1,16 @@
+#include "handmade.h"
+
 #include <windows.h>
-#include <stdint.h> // Bring in unit8_t to avoid casting to (unsigned char *)
 #include <stdio.h> // for _snprintf_s logging
 #include <xinput.h> // Device input like joypads
 #include <dsound.h>
-#include <math.h>
+
 #include "win32_handmade.h"
 
-#define internal_function static
-#define local_persist static
-#define global_variable static
-#define Pi32 3.14159265359f
-
-typedef uint8_t uint8;
-typedef uint16_t uint16;
-typedef uint32_t uint32;
-typedef uint64_t uint64;
-
-typedef int8_t int8;
-typedef int16_t int16;
-typedef int32_t int32;
-typedef int64_t int64;
-
-typedef float real32;
-typedef double real64;
-
-#include "handmade.cpp"
 
 /*
 // NOTE: Not using this because I can't get zig to compile it and I'm using Windows 10...
+// Actually... I can do this now that I figured it out....
 //
 // Create function pointers to xinput functions in case the linker
 // can't find the required files on the version of Windows.
@@ -157,6 +140,65 @@ debug_platform_write_entire_file(char *file_name, uint32_t memory_size, void *me
 
   return(result);
 }
+
+// Holds function pointers imported for live-loading game code.
+struct Win32GameCode {
+  // The shared dll where these function pointers are defined and implemented
+  HMODULE dll;
+
+  // function pointer
+  PtrGameUpdateAndRender *update_and_render;
+  
+  // function pointer
+  PtrGameGetSoundSamples *get_sound_samples;
+
+  // Indicates if the function pointers were loaded
+  bool is_valid;
+};
+
+static Win32GameCode
+win32_load_game_code(void) {
+  Win32GameCode function_pointers = {};
+
+  // TODO - probably shouldn't hard-code these paths?
+  CopyFile("./build/handmade.dll", "./build/handmade_temp.dll", FALSE);
+  function_pointers.dll = LoadLibraryA("handmade_temp.dll");
+
+  if (function_pointers.dll) {
+    function_pointers.update_and_render = 
+      (PtrGameUpdateAndRender *)GetProcAddress(function_pointers.dll, "game_update_and_render");
+    function_pointers.get_sound_samples = 
+      (PtrGameGetSoundSamples *)GetProcAddress(function_pointers.dll, "game_get_sound_samples");
+
+    function_pointers.is_valid = (
+        function_pointers.update_and_render &&
+        function_pointers.get_sound_samples
+    );
+  }
+
+  // Default to stub functions on failure
+  if (!function_pointers.is_valid) {
+    function_pointers.update_and_render = game_update_and_render_stub;
+    function_pointers.get_sound_samples = game_get_sound_samples_stub;
+  }
+
+  return function_pointers;
+}
+
+// Unloads the live-loaded game code dll
+static void
+win32_unload_game_code(Win32GameCode *game_code) {
+  if (game_code->dll) {
+    FreeLibrary(game_code->dll);
+    game_code->dll = 0;
+  }
+
+  game_code->is_valid = false;
+  game_code->update_and_render = game_update_and_render_stub;
+  game_code->get_sound_samples = game_get_sound_samples_stub;
+}
+
+
 
 static void 
 win32_process_keyboard_message(
@@ -718,6 +760,7 @@ int CALLBACK WinMain(
 	LPSTR lpCmdLine,
 	int nCmdShow
 ) {
+
 	LARGE_INTEGER perf_counter_frequency_result;
 	QueryPerformanceFrequency(&perf_counter_frequency_result);
   GlobalPerfCounterFrequency = perf_counter_frequency_result.QuadPart;
@@ -738,7 +781,7 @@ int CALLBACK WinMain(
   //int monitor_refresh_rate = 60;
   //int game_update_hz = monitor_refresh_rate / 2;
 #define monitor_refresh_rate 60
-//#define frames_of_audio_latency 4
+  //#define frames_of_audio_latency 4
 #define game_update_hz (monitor_refresh_rate / 2)
   float target_seconds_per_frame = 1.0f / (float)game_update_hz;
 
@@ -815,12 +858,22 @@ int CALLBACK WinMain(
       GameInput *new_input = &game_input[0];
       GameInput *old_input = &game_input[1];
 
+      // Load function pointers for live-loading game code.
+      Win32GameCode game_code = win32_load_game_code();
+      uint32_t load_counter = 0;
+
       // Performance counting
       LARGE_INTEGER last_counter = win32_get_wall_clock();
 			int64_t last_cycle_count = __rdtsc();
       LARGE_INTEGER flip_wall_clock = win32_get_wall_clock();
 
 			while(Running) {
+        if (load_counter++ > 120) {
+          win32_unload_game_code(&game_code);
+          game_code = win32_load_game_code();
+          load_counter = 0;
+        }
+
         GameControllerInput *old_keyboard_controller = &old_input->controllers[0];
         GameControllerInput *new_keyboard_controller = &new_input->controllers[0];
         GameControllerInput zeroed_controller = {};
@@ -989,7 +1042,7 @@ int CALLBACK WinMain(
 				game_offscreen_buffer.width =  GlobalBackBuffer.width;
 				game_offscreen_buffer.height = GlobalBackBuffer.height;
 				game_offscreen_buffer.pitch = GlobalBackBuffer.pitch;
-				game_update_and_render(&game_memory, new_input, &game_offscreen_buffer);
+				game_code.update_and_render(&game_memory, new_input, &game_offscreen_buffer);
 
        
 
@@ -1062,7 +1115,7 @@ int CALLBACK WinMain(
           sound_buffer.samples_per_second = sound_output.samples_per_second;
           sound_buffer.sample_count = bytes_to_write / sound_output.bytes_per_sample;
           sound_buffer.samples = samples;
-          game_get_sound_samples(&game_memory, &sound_buffer);
+          game_code.get_sound_samples(&game_memory, &sound_buffer);
 
           // Debug Sound stuff
           Win32DebugSoundCursor *sound_cursor = &debug_sound_cursors[debug_sound_cursor_idx];

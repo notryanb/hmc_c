@@ -1,3 +1,27 @@
+#include <math.h>
+#include <stdint.h>
+
+#define internal_function static
+#define local_persist static
+#define global_variable static
+#define Pi32 3.14159265359f
+
+typedef uint8_t uint8;
+typedef uint16_t uint16;
+typedef uint32_t uint32;
+typedef uint64_t uint64;
+
+typedef int8_t int8;
+typedef int16_t int16;
+typedef int32_t int32;
+typedef int64_t int64;
+
+typedef float real32;
+typedef double real64;
+
+//#include "handmade.h"
+//#include "handmade.cpp"
+
 #if !defined(HANDMADE_H)
 
 // Macros
@@ -56,6 +80,7 @@ struct GameControllerInput {
   };
 };
 
+
 struct GameInput {
   GameControllerInput controllers[5];
 };
@@ -65,6 +90,7 @@ struct GameState {
   int tone_hz;
   int blue_offset;
   int green_offset;
+  float sine;
 };
 
 struct GameMemory {
@@ -85,16 +111,13 @@ inline GameControllerInput *get_controller(GameInput *game_input, int controller
   return controller;
 }
 
-static void game_update_and_render(
-    GameMemory *game_memory,
-    GameInput *game_input,
-    GameOffScreenBuffer *buffer
-);
+#define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory,GameInput *input,GameOffScreenBuffer *buffer)
+typedef GAME_UPDATE_AND_RENDER(PtrGameUpdateAndRender);
+GAME_UPDATE_AND_RENDER(game_update_and_render_stub) {}
 
-static void game_get_sound_samples(
-    GameMemory *game_memory,
-    GameSoundOutputBuffer *sound_buffer
-);
+#define GAME_GET_SOUND_SAMPLES(name) void name(GameMemory *game_memory,GameSoundOutputBuffer *sound_buffer)
+typedef GAME_GET_SOUND_SAMPLES(PtrGameGetSoundSamples);
+GAME_GET_SOUND_SAMPLES(game_get_sound_samples_stub) {}
 
 #define HANDMADE_H
 #endif
