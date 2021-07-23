@@ -141,28 +141,29 @@ debug_platform_write_entire_file(char *file_name, uint32_t memory_size, void *me
   return(result);
 }
 
-// Holds function pointers imported for live-loading game code.
-struct Win32GameCode {
-  // The shared dll where these function pointers are defined and implemented
-  HMODULE dll;
 
-  // function pointer
-  PtrGameUpdateAndRender *update_and_render;
-  
-  // function pointer
-  PtrGameGetSoundSamples *get_sound_samples;
+// TODO - Figure out how to deal with passing const char * string literals
+// into functions
+inline FILETIME
+win32_get_last_write_time(char *file_path) {
+  FILETIME last_write_time = {};
+  WIN32_FIND_DATA find_data;
+  HANDLE find_handle = FindFirstFile(file_path, &find_data);
 
-  // Indicates if the function pointers were loaded
-  bool is_valid;
-};
+  if (find_handle != INVALID_HANDLE_VALUE) {
+    last_write_time = find_data.ftLastWriteTime;
+    FindClose(find_handle);
+  }
+
+  return last_write_time;
+}
 
 static Win32GameCode
-win32_load_game_code(void) {
+win32_load_game_code(char *source_dll_name, char *temp_dll_name) {
   Win32GameCode function_pointers = {};
-
-  // TODO - probably shouldn't hard-code these paths?
-  CopyFile("./build/handmade.dll", "./build/handmade_temp.dll", FALSE);
-  function_pointers.dll = LoadLibraryA("handmade_temp.dll");
+  CopyFile(source_dll_name, temp_dll_name, FALSE);
+  function_pointers.dll = LoadLibraryA(temp_dll_name);
+  function_pointers.last_write_time = win32_get_last_write_time(source_dll_name);
 
   if (function_pointers.dll) {
     function_pointers.update_and_render = 
@@ -754,12 +755,61 @@ win32_get_wall_clock(void) {
   return counter;
 }
 
+static void
+concat_strings(
+    int source_one_count, char *source_one,
+    int source_two_count, char *source_two,
+    int destination_count, char *destination)
+{
+  for (int index = 0; index < source_one_count; ++index) {
+    *destination++ = *source_one++;
+  }
+  
+  for (int index = 0; index < source_two_count; ++index) {
+    *destination++ = *source_two++;
+  }
+
+  *destination++ = 0;
+
+}
+
 int CALLBACK WinMain(
 	HINSTANCE Instance,
 	HINSTANCE PrevInstance,
 	LPSTR lpCmdLine,
 	int nCmdShow
 ) {
+  // Get path of where this executable is running
+  char exe_file_name[MAX_PATH];
+  DWORD size_of_filename = GetModuleFileNameA(0, exe_file_name, sizeof(exe_file_name));
+  char *one_past_last_slash = exe_file_name;
+  for (char *scan = exe_file_name; *scan; ++scan) {
+    if (*scan == '\\') {
+      one_past_last_slash = scan + 1;
+    }
+  }
+
+  char source_game_code_dll_filename[] = "handmade.dll";
+  char source_game_code_dll_full_path[MAX_PATH];
+  concat_strings(
+      one_past_last_slash - exe_file_name, 
+      exe_file_name,
+      sizeof(source_game_code_dll_filename) - 1,
+      source_game_code_dll_filename,
+      sizeof(source_game_code_dll_full_path),
+      source_game_code_dll_full_path
+  );
+  
+  char temp_game_code_dll_filename[] = "handmade_temp.dll";
+  char temp_game_code_dll_full_path[MAX_PATH];
+  concat_strings(
+      one_past_last_slash - exe_file_name, 
+      exe_file_name,
+      sizeof(temp_game_code_dll_filename) - 1,
+      temp_game_code_dll_filename,
+      sizeof(temp_game_code_dll_full_path),
+      temp_game_code_dll_full_path
+  );
 
 	LARGE_INTEGER perf_counter_frequency_result;
 	QueryPerformanceFrequency(&perf_counter_frequency_result);
@@ -859,8 +909,11 @@ int CALLBACK WinMain(
       GameInput *old_input = &game_input[1];
 
       // Load function pointers for live-loading game code.
-      Win32GameCode game_code = win32_load_game_code();
-      uint32_t load_counter = 0;
+      //char *source_dll_name = "./build/handmade.dll";
+      Win32GameCode game_code = win32_load_game_code(
+          source_game_code_dll_full_path,
+          temp_game_code_dll_full_path
+      );
 
       // Performance counting
       LARGE_INTEGER last_counter = win32_get_wall_clock();
@@ -868,10 +921,15 @@ int CALLBACK WinMain(
       LARGE_INTEGER flip_wall_clock = win32_get_wall_clock();
 
 			while(Running) {
-        if (load_counter++ > 120) {
+
+        FILETIME new_dll_write_time = win32_get_last_write_time(source_game_code_dll_full_path);
+
+        if (CompareFileTime(&new_dll_write_time, &game_code.last_write_time) != 0) {
           win32_unload_game_code(&game_code);
-          game_code = win32_load_game_code();
-          load_counter = 0;
+          game_code = win32_load_game_code(
+              source_game_code_dll_full_path,
+              temp_game_code_dll_full_path
+          );
         }
 
         GameControllerInput *old_keyboard_controller = &old_input->controllers[0];

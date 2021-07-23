@@ -1,6 +1,24 @@
 
 #if !defined(WIN32_HANDMADE_H)
 
+// Holds function pointers imported for live-loading game code.
+struct Win32GameCode {
+  // The shared dll where these function pointers are defined and implemented
+  HMODULE dll;
+
+  // The last time this file was written to.
+  FILETIME last_write_time;
+
+  // function pointer
+  PtrGameUpdateAndRender *update_and_render;
+  
+  // function pointer
+  PtrGameGetSoundSamples *get_sound_samples;
+
+  // Indicates if the function pointers were loaded
+  bool is_valid;
+};
+
 struct Win32DebugSoundCursor {
   DWORD output_play_cursor;
   DWORD output_write_cursor;
