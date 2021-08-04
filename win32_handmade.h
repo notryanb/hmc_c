@@ -39,7 +39,7 @@ struct Win32SoundOutput {
 };
 
 
-struct  Win32OffScreenBuffer {
+struct Win32OffScreenBuffer {
 	BITMAPINFO info;
 	void *memory;
 	int width;
@@ -51,6 +51,26 @@ struct  Win32OffScreenBuffer {
 struct Win32WindowDimension {
 	int width;
 	int height;
+};
+
+struct Win32State {
+  // indicates the size of the game memory chunk
+  uint64_t game_memory_total_size;
+
+  // pointer to the game memory address
+  void *game_memory;
+
+  // File handle to where the state gets persisted
+  HANDLE recording_handle;
+
+  // Indicates position into the recording state
+  int input_recording_index;
+  
+  // File handle to where the state is read from
+  HANDLE playback_handle;
+
+  // Indicates position into the playback state
+  int input_playback_index;
 };
 
 

@@ -36,6 +36,106 @@ global_variable Win32OffScreenBuffer GlobalBackBuffer;
 global_variable LPDIRECTSOUNDBUFFER GlobalSecondarySoundBuffer;
 global_variable int64_t GlobalPerfCounterFrequency;
 
+static void
+win32_begin_recording_input(Win32State *win32_state, int recording_index) {
+  win32_state->input_recording_index = recording_index;
+
+  win32_state->recording_handle = CreateFileA(
+    "debug_playback.hmh",
+    GENERIC_WRITE,
+    0,
+    0,
+    CREATE_ALWAYS,
+    0,
+    0
+  );
+
+  // Windows has a size limit of how much memory can be written to a file at once.
+  // The game state is going to eventually become large enough to hit this limit.
+  // If we exceed 4GB, we need to change this to a for loop and add the memory incrementally.
+  // Assert(win32_state->game_memory_total_size < 0xFFFFFFFF);
+
+  DWORD bytes_to_write = (DWORD)win32_state->game_memory_total_size;
+  DWORD bytes_written = 0;
+  WriteFile(
+      win32_state->recording_handle,
+      win32_state->game_memory,
+      bytes_to_write,
+      &bytes_written,
+      0
+  );
+}
+
+static void
+win32_end_recording_input(Win32State *win32_state) {
+  CloseHandle(win32_state->recording_handle);
+  win32_state->input_recording_index = 0;
+}
+
+static void
+win32_begin_playback_input(Win32State *win32_state, int playback_index) {
+  win32_state->input_playback_index = playback_index;
+
+  win32_state->playback_handle = CreateFileA(
+    "debug_playback.hmh",
+    GENERIC_READ,
+    FILE_SHARE_READ,
+    0,
+    OPEN_EXISTING,
+    0,
+    0
+  );
+  
+  DWORD bytes_to_read = (DWORD)win32_state->game_memory_total_size;
+  DWORD bytes_read = 0;
+  ReadFile(
+      win32_state->playback_handle,
+      win32_state->game_memory,
+      bytes_to_read,
+      &bytes_read,
+      0
+  );
+}
+
+static void
+win32_end_playback_input(Win32State *win32_state) {
+  CloseHandle(win32_state->playback_handle);
+  win32_state->input_playback_index = 0;
+}
+
+// write playback to file
+static void
+win32_record_input(Win32State *win32_state, GameInput *new_input) {
+  DWORD bytes_written;
+  WriteFile(
+      win32_state->recording_handle,
+      new_input,
+      sizeof(*new_input),
+      &bytes_written,
+      0
+  );
+}
+
+// read playback from file
+static void
+win32_playback_input(Win32State *win32_state, GameInput *new_input) {
+  DWORD bytes_read = 0;
+  if(ReadFile(
+      win32_state->playback_handle,
+      new_input,
+      sizeof(*new_input),
+      &bytes_read,
+      0
+  )) {
+    // All of the input was read. Go back to the beginning.
+    if (bytes_read == 0) {
+      int playing_index = win32_state->input_playback_index;
+      win32_end_playback_input(win32_state);
+      win32_begin_playback_input(win32_state, playing_index);
+    }
+  };
+}
+
 static DebugFileReadResult
 debug_platform_read_entire_file(char *file_name) {
   DebugFileReadResult result = {};
@@ -479,7 +579,7 @@ LRESULT CALLBACK  Win32MainWindowCallback(
 };
 
 static void
-win32_process_pending_messages(GameControllerInput *keyboard_controller) {
+win32_process_pending_messages(Win32State *win32_state, GameControllerInput *keyboard_controller) {
   MSG message;
 
   while(PeekMessage(&message, 0, 0, 0, PM_REMOVE)) {
@@ -550,6 +650,15 @@ win32_process_pending_messages(GameControllerInput *keyboard_controller) {
           } else if (keycode == VK_ESCAPE) {
             Running = false;
           } else if (keycode == VK_SPACE) {
+          } else if (keycode == 'L') {
+            if (is_down) {
+              if (win32_state->input_recording_index == 0) {
+                win32_begin_recording_input(win32_state, 1);
+              } else {
+                win32_end_recording_input(win32_state);
+                win32_begin_playback_input(win32_state, 1);
+              }
+            }
           }
         }
 
@@ -773,6 +882,7 @@ concat_strings(
 
 }
 
+
 int CALLBACK WinMain(
 	HINSTANCE Instance,
 	HINSTANCE PrevInstance,
@@ -876,25 +986,45 @@ int CALLBACK WinMain(
         PAGE_READWRITE
       );
 				
+      Win32State win32_state = {};
+      win32_state.input_recording_index = 0;
+      win32_state.input_playback_index = 0;
+
 			Running = true;
 
       // Initialize game memory
+      //LPVOID base_game_memory_address = 2 * 1024 * 1024 * 1024 * 1024; // 2 TB
+      LPVOID base_game_memory_address = 0;
+
       GameMemory game_memory = {};
       game_memory.permanent_storage_size = 64 * 1024 * 1024; // 64MB
-      game_memory.permanent_storage = VirtualAlloc(
-        0, 
-        game_memory.permanent_storage_size, 
+      game_memory.transient_storage_size = (uint64_t)4 * 1024 * 1024 * 1024; // 4GB
+      win32_state.game_memory_total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size;
+
+      win32_state.game_memory = VirtualAlloc(
+        base_game_memory_address, 
+        (size_t)win32_state.game_memory_total_size,
         MEM_RESERVE|MEM_COMMIT, 
         PAGE_READWRITE
       );
 
-      game_memory.transient_storage_size = (uint64_t)4 * 1024 * 1024 * 1024; // 4GB
-      game_memory.transient_storage = VirtualAlloc(
+      game_memory.permanent_storage = win32_state.game_memory;
+
+      // TODO: Figure out transient_storage
+      /*
+       * Need to get this working. Unsure of game memory struct changes.
+      game_memory.transient_storage = ((uint8_t)game_memory.permanent_storage +
+          game_memory.permanent_storage_size);
+      */
+
+      /*
+      win32_state.game_memory.transient_storage = VirtualAlloc(
         0, 
-        game_memory.transient_storage_size, 
+        win32_state.game_memory.transient_storage_size, 
         MEM_RESERVE|MEM_COMMIT, 
         PAGE_READWRITE
       );
+      */
 
       // Initialize sound cursor tracking
       int debug_sound_cursor_idx = 0;
@@ -946,7 +1076,7 @@ int CALLBACK WinMain(
             old_keyboard_controller->buttons[button_idx].ended_down;
         }
 
-        win32_process_pending_messages(new_keyboard_controller);
+        win32_process_pending_messages(&win32_state, new_keyboard_controller);
 
         int max_controller_count = XUSER_MAX_COUNT;
         if(max_controller_count > (ArrayCount(new_input->controllers) - 1)) {
@@ -1100,6 +1230,17 @@ int CALLBACK WinMain(
 				game_offscreen_buffer.width =  GlobalBackBuffer.width;
 				game_offscreen_buffer.height = GlobalBackBuffer.height;
 				game_offscreen_buffer.pitch = GlobalBackBuffer.pitch;
+				game_offscreen_buffer.bytes_per_pixel = GlobalBackBuffer.bytes_per_pixel;
+
+        if (win32_state.input_recording_index) {
+          win32_record_input(&win32_state, new_input);
+        }
+
+        if (win32_state.input_playback_index) {
+          // Overwrites input from previous stream
+          win32_playback_input(&win32_state, new_input);
+        }
+
 				game_code.update_and_render(&game_memory, new_input, &game_offscreen_buffer);
 
        
@@ -1135,15 +1276,23 @@ int CALLBACK WinMain(
           float seconds_left_until_flip = target_seconds_per_frame - frame_begin_audio_seconds_delta;
           float audio_frame_ratio = seconds_left_until_flip / target_seconds_per_frame;
 
+          // TODO!!!!!
+          // This expected_bytes_until_flip calculation is blowing up when declared as a DWORD and the screen is resizing.
+          // Need to investigate this bug and better understand the sound code.
+          // Setting it to 0 for now, because we weren't even using it.
           /*
           float expected_bytes_until_flip = 
               (seconds_left_until_flip / target_seconds_per_frame) * 
               (float)expected_sound_bytes_per_frame;
           */
 
+          /*
           DWORD expected_bytes_until_flip = (DWORD)(
               (seconds_left_until_flip / target_seconds_per_frame) * 
               (float)expected_sound_bytes_per_frame);
+          */
+
+          DWORD expected_bytes_until_flip = 0;
 
           DWORD expected_frame_boundary_byte = play_cursor + expected_sound_bytes_per_frame;
           DWORD safe_write_cursor = write_cursor + sound_output.safety_bytes;

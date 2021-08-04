@@ -42,6 +42,7 @@ struct GameOffScreenBuffer {
 	int width;
 	int height;
 	int pitch;
+  int bytes_per_pixel;
 };
 
 struct GameSoundOutputBuffer {
@@ -91,6 +92,10 @@ struct GameState {
   int blue_offset;
   int green_offset;
   float sine;
+
+  int player_x;
+  int player_y;
+  float jump_timer;
 };
 
 struct GameMemory {

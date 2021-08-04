@@ -44,6 +44,33 @@ output_sound(GameState *game_state, GameSoundOutputBuffer *sound_buffer, int ton
 		}
 }
 
+// Renders a small square as the player
+static void
+render_player(GameOffScreenBuffer *buffer, int player_x, int player_y) {
+  uint8_t *end_of_buffer = (uint8_t *)buffer->memory + 
+    buffer->pitch * 
+    buffer->height;
+
+
+  uint32_t color = 0xFFFFFFFF;
+  int top = player_y;
+  int bottom = player_y + 10;
+
+  for(int x = player_x; x < player_x + 10; ++x) {
+    uint8_t *pixel =  (uint8_t *)buffer->memory + 
+        (x * buffer->bytes_per_pixel) + 
+        (top * buffer->pitch);
+
+    for(int y = top; y < bottom; ++y) {
+      if ((pixel >= buffer->memory) && ((pixel + 4) <= end_of_buffer)) {
+        *(uint32_t *)pixel = color; 
+      }
+
+      pixel += buffer->pitch;
+    }
+  }
+}
+
 // the declspec ensures this function is exported in the DLL
 extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render)
 {
@@ -71,6 +98,9 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render)
     game_state->tone_hz = 256;
     game_state->sine = 0.0f;
 
+    game_state->player_x = 100;
+    game_state->player_y = 100;
+
     memory->is_initialized = true;
   }
 
@@ -95,12 +125,24 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render)
       // TODO - Digital movement tuning
     }
 
-    if(controller->action_down.ended_down) {
-      game_state->green_offset += 1;
+
+    game_state->player_x += (int)(4.0f * controller->avg_stick_x);
+    game_state->player_y -= (int)(4.0f * controller->avg_stick_y);
+   
+    if (game_state->jump_timer > 0) {
+      game_state->player_y -= (int)(10.f * sinf(game_state->jump_timer));
     }
+
+    if(controller->action_down.ended_down) {
+      //game_state->green_offset += 1;
+      game_state->jump_timer = 1.0;
+      game_state->player_y -= 10;
+    }
+    game_state->jump_timer -= 0.033f;
   }
 
 	render_weird_gradient(buffer, game_state->blue_offset, game_state->green_offset);
+  render_player(buffer, game_state->player_x, game_state->player_y);
 };
 
 
