@@ -247,12 +247,10 @@ debug_platform_write_entire_file(char *file_name, uint32_t memory_size, void *me
 inline FILETIME
 win32_get_last_write_time(char *file_path) {
   FILETIME last_write_time = {};
-  WIN32_FIND_DATA find_data;
-  HANDLE find_handle = FindFirstFile(file_path, &find_data);
 
-  if (find_handle != INVALID_HANDLE_VALUE) {
-    last_write_time = find_data.ftLastWriteTime;
-    FindClose(find_handle);
+  WIN32_FILE_ATTRIBUTE_DATA file_data;
+  if (GetFileAttributesEx(file_path, GetFileExInfoStandard, &file_data)) {
+    last_write_time = file_data.ftLastWriteTime;
   }
 
   return last_write_time;
@@ -516,7 +514,7 @@ static void Win32DisplayBufferInWindow(
 ) {
 	StretchDIBits(
 		device_context,
-		0, 0, window_width, window_height,
+		0, 0, buffer->width, buffer->height,
 		0, 0, buffer->width, buffer->height,
 		buffer->memory,
 		&buffer->info,
@@ -937,12 +935,9 @@ int CALLBACK WinMain(
 	WindowClass.hInstance = Instance;
 	WindowClass.lpszClassName = "HandmadeHeroWindowClass";
 
-  // Fixed frame timing: 30fps
-  //int monitor_refresh_rate = 60;
-  //int game_update_hz = monitor_refresh_rate / 2;
 #define monitor_refresh_rate 60
-  //#define frames_of_audio_latency 4
 #define game_update_hz (monitor_refresh_rate / 2)
+
   float target_seconds_per_frame = 1.0f / (float)game_update_hz;
 
 	/* takes pointer to WindowClass */
@@ -1096,8 +1091,8 @@ int CALLBACK WinMain(
 
 						XINPUT_GAMEPAD *gamepad = &controller_state.Gamepad;
 
-            new_controller->is_analog = true;
             new_controller->is_connected = true;
+            new_controller->is_analog = old_controller->is_analog;
 
             new_controller->avg_stick_x = win32_process_input_stick_value(
               gamepad->sThumbLX,

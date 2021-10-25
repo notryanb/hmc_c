@@ -13,3 +13,7 @@ zig cc win_handmade.cpp -o build\win_handmade.exe -l user32 -l gdi32 -l xinput -
 ## Notes
 - use VisualStudio `dumpbin /EXPORTS <DLL HERE>` to view exported functions from DLLs
 
+## Replay Feature (Debug loops)
+- press `l` while the game is running and then enter some game controller input.
+- Once done entering game input, press `l` to finish the recording section and initiate looping.
+

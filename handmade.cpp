@@ -146,6 +146,8 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render)
 };
 
 
+// Gets sound samples from the game state which is initialized / allocatred in 
+// the Windows specific code.
 extern "C" __declspec(dllexport) GAME_GET_SOUND_SAMPLES(game_get_sound_samples)
 {
   GameState *game_state = (GameState *)game_memory->permanent_storage;
