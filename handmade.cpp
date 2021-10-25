@@ -1,12 +1,11 @@
 #include "handmade.h"
 
-static void 
-render_weird_gradient(GameOffScreenBuffer *buffer, int x_offset, int y_offset) {
+static void  render_weird_gradient(GameOffScreenBuffer *buffer, int x_offset, int y_offset) {
 	// ensure void* is cast to unsigned 8-bit int so we can do pointer arithmetic
-	uint8 *row = (uint8 *)buffer->memory;
+	u8 *row = (u8 *)buffer->memory;
 
 	for(int y = 0; y < buffer->height; ++y) {
-    uint32 *pixel = (uint32 *)row;
+    u32 *pixel = (u32 *)row;
 
 		for(int x = 0; x < buffer->width; ++x) {
 			/* 
@@ -15,8 +14,8 @@ render_weird_gradient(GameOffScreenBuffer *buffer, int x_offset, int y_offset) {
 			 * Bytes: 00 00 00 00
 			 * Repr:  xx RR GG BB
 			 */
-			uint8 blue = (x + x_offset);
-			uint8 green = (y + y_offset); 
+			u8 blue = (x + x_offset);
+			u8 green = (y + y_offset); 
 			*pixel++ = ((green << 8) | blue);
 		}
 
@@ -24,20 +23,20 @@ render_weird_gradient(GameOffScreenBuffer *buffer, int x_offset, int y_offset) {
 	}
 }
 
-static void 
-output_sound(GameState *game_state, GameSoundOutputBuffer *sound_buffer, int toneHz) {
-    int16_t tone_volume = 3000;
+// The sound_buffer is interleaved LRLRLR...
+static void output_sound(ThreadContext *thread_ctx, GameState *game_state, GameSoundOutputBuffer *sound_buffer, int toneHz) {
+    i16 tone_volume = 2500;
     int wave_period = sound_buffer->samples_per_second / toneHz;
 
-		int16_t *sample_out = sound_buffer->samples;
+		i16 *sample_out = sound_buffer->samples;
 
 		for(int sample_index = 0; sample_index < sound_buffer->sample_count; ++sample_index) {
-			float sine_value = sinf(game_state->sine);
-			int16_t sample_value = (int16)(sine_value * tone_volume);
+			f32 sine_value = sinf(game_state->sine);
+			i16 sample_value = (i16)(sine_value * tone_volume);
 			*sample_out++ = sample_value;
 			*sample_out++ = sample_value;
 
-      game_state->sine += 2.0f * Pi32 * (1.0f / (float)wave_period);
+      game_state->sine += 2.0f * Pi32 * (1.0f / (f32)wave_period);
       if (game_state->sine > 2.0f * Pi32) {
         game_state->sine -= 2.0f * Pi32;
       }
@@ -45,25 +44,20 @@ output_sound(GameState *game_state, GameSoundOutputBuffer *sound_buffer, int ton
 }
 
 // Renders a small square as the player
-static void
-render_player(GameOffScreenBuffer *buffer, int player_x, int player_y) {
-  uint8_t *end_of_buffer = (uint8_t *)buffer->memory + 
-    buffer->pitch * 
-    buffer->height;
-
-
-  uint32_t color = 0xFFFFFFFF;
+static void render_player(GameOffScreenBuffer *buffer, int player_x, int player_y) {
+  u8 *end_of_buffer = (u8 *)buffer->memory + buffer->pitch * buffer->height;
+  u32 color = 0xFFFFFFFF;
   int top = player_y;
   int bottom = player_y + 10;
 
   for(int x = player_x; x < player_x + 10; ++x) {
-    uint8_t *pixel =  (uint8_t *)buffer->memory + 
+    u8 *pixel =  (u8 *)buffer->memory + 
         (x * buffer->bytes_per_pixel) + 
         (top * buffer->pitch);
 
     for(int y = top; y < bottom; ++y) {
       if ((pixel >= buffer->memory) && ((pixel + 4) <= end_of_buffer)) {
-        *(uint32_t *)pixel = color; 
+        *(u32 *)pixel = color; 
       }
 
       pixel += buffer->pitch;
@@ -77,21 +71,21 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render)
   GameState *game_state = (GameState *)memory->permanent_storage;
 
   if (!memory->is_initialized) {
-    /* Debug file reading/writing
-    char *file_name = "D:/Programming/handmade_hero/README.md";
-    DebugFileReadResult file_result = debug_platform_read_entire_file(file_name);
+    // Debug file reading/writing
+    const char *file_name = "D:/Programming/handmade_hero/README.md";
+    DebugFileReadResult file_result = memory->dbg_platform_read_entire_file(thread_ctx, file_name);
 
     if (file_result.contents) {
-      debug_platform_write_entire_file(
-          "D:/Programming/handmade_hero/test.out", 
+      const char *output_file_name = "D:/Programming/handmade_hero/test.out";
+      memory->dbg_platform_write_entire_file(
+          thread_ctx,
+          output_file_name, 
           file_result.contents_size,
           file_result.contents
       );
-
-      debug_platform_free_file_memory(file_result.contents);
+      
+      memory->dbg_platform_free_file_memory(thread_ctx, file_result.contents);
     }
-    */
-
 
     game_state->blue_offset = 0;
     game_state->green_offset = 0;
@@ -104,11 +98,11 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render)
     memory->is_initialized = true;
   }
 
-  for(int controller_idx = 0;
+  for (int controller_idx = 0;
       controller_idx < ArrayCount(input->controllers);
       ++controller_idx) 
   {
-    GameControllerInput *controller = &input->controllers[controller_idx];
+    GameControllerInput *controller = get_controller(input, controller_idx);
     
     if(controller->is_analog) {
       // TODO: Analog movement tuning
@@ -136,7 +130,7 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render)
     if(controller->action_down.ended_down) {
       //game_state->green_offset += 1;
       game_state->jump_timer = 1.0;
-      game_state->player_y -= 10;
+      game_state->player_y -= 3;
     }
     game_state->jump_timer -= 0.033f;
   }
@@ -146,9 +140,11 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render)
 };
 
 
+// Gets sound samples from the game state which is initialized / allocatred in 
+// the Windows specific code.
 extern "C" __declspec(dllexport) GAME_GET_SOUND_SAMPLES(game_get_sound_samples)
 {
   GameState *game_state = (GameState *)game_memory->permanent_storage;
-  output_sound(game_state, sound_buffer, game_state->tone_hz);
+  output_sound(thread_ctx, game_state, sound_buffer, game_state->tone_hz);
 }
 

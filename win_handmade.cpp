@@ -1,43 +1,43 @@
 #include "handmade.h"
-
 #include <windows.h>
+
+#include "win32_handmade.h"
+
 #include <stdio.h> // for _snprintf_s logging
 #include <xinput.h> // Device input like joypads
 #include <dsound.h>
 
-#include "win32_handmade.h"
 
+// Macro to create function prototypes
+#define X_INPUT_GET_STATE(name) DWORD WINAPI name(DWORD dwUserIndex, XINPUT_STATE *pState)
+#define X_INPUT_SET_STATE(name) DWORD WINAPI name(DWORD dwUserIndex, XINPUT_VIBRATION *pVibration)
 
-/*
-// NOTE: Not using this because I can't get zig to compile it and I'm using Windows 10...
-// Actually... I can do this now that I figured it out....
-//
-// Create function pointers to xinput functions in case the linker
-// can't find the required files on the version of Windows.
-// We remap to try and trick the compiler to allow us to syntactically reference the function
-// as if it were the lib version. We're still including the header file to get
-// all the other definitions
-
-#define X_INPUT_GET_STATE(name) WINAPI name(DWORD dwUserIndex, XINPUT_STATE *pState)
+// typedef macro to expand out functions with the names given as input
 typedef X_INPUT_GET_STATE(x_input_get_state);
-X_INPUT_GET_STATE(XInputGetStateStub) { return(0); }
-global_variable x_input_get_state *XInputGetState_ = XInputGetStateStub;
-#define XInputGetState XInputGetState_
-
-#define X_INPUT_SET_STATE(name) WINAPI name(DWORD dwUserIndex, XINPUT_VIBRATION *pVibration)
 typedef X_INPUT_SET_STATE(x_input_set_state);
+
+// Create function stubs with bodies
+X_INPUT_GET_STATE(XInputGetStateStub) { return(0); }
 X_INPUT_SET_STATE(XInputSetStateStub) { return(0); }
+
+// Set variables to function pointers
+global_variable x_input_get_state *XInputGetState_ = XInputGetStateStub;
 global_variable x_input_set_state *XInputSetState_ = XInputSetStateStub;
+
+// Aliases the real function name to the function stub
+#define XInputGetState XInputGetState_
 #define XInputSetState XInputSetState_
-*/
+
 
 global_variable bool Running = false;
 global_variable Win32OffScreenBuffer GlobalBackBuffer;
 global_variable LPDIRECTSOUNDBUFFER GlobalSecondarySoundBuffer;
+
+// QueryPerformanceFrequency indicates how many clocks we go through in one second.
+// This counter is fixed at system boot and consistent across all processors
 global_variable int64_t GlobalPerfCounterFrequency;
 
-static void
-win32_begin_recording_input(Win32State *win32_state, int recording_index) {
+static void win32_begin_recording_input(Win32State *win32_state, int recording_index) {
   win32_state->input_recording_index = recording_index;
 
   win32_state->recording_handle = CreateFileA(
@@ -66,14 +66,12 @@ win32_begin_recording_input(Win32State *win32_state, int recording_index) {
   );
 }
 
-static void
-win32_end_recording_input(Win32State *win32_state) {
+static void win32_end_recording_input(Win32State *win32_state) {
   CloseHandle(win32_state->recording_handle);
   win32_state->input_recording_index = 0;
 }
 
-static void
-win32_begin_playback_input(Win32State *win32_state, int playback_index) {
+static void win32_begin_playback_input(Win32State *win32_state, int playback_index) {
   win32_state->input_playback_index = playback_index;
 
   win32_state->playback_handle = CreateFileA(
@@ -97,15 +95,13 @@ win32_begin_playback_input(Win32State *win32_state, int playback_index) {
   );
 }
 
-static void
-win32_end_playback_input(Win32State *win32_state) {
+static void win32_end_playback_input(Win32State *win32_state) {
   CloseHandle(win32_state->playback_handle);
   win32_state->input_playback_index = 0;
 }
 
 // write playback to file
-static void
-win32_record_input(Win32State *win32_state, GameInput *new_input) {
+static void win32_record_input(Win32State *win32_state, GameInput *new_input) {
   DWORD bytes_written;
   WriteFile(
       win32_state->recording_handle,
@@ -117,8 +113,7 @@ win32_record_input(Win32State *win32_state, GameInput *new_input) {
 }
 
 // read playback from file
-static void
-win32_playback_input(Win32State *win32_state, GameInput *new_input) {
+static void win32_playback_input(Win32State *win32_state, GameInput *new_input) {
   DWORD bytes_read = 0;
   if(ReadFile(
       win32_state->playback_handle,
@@ -136,8 +131,14 @@ win32_playback_input(Win32State *win32_state, GameInput *new_input) {
   };
 }
 
-static DebugFileReadResult
-debug_platform_read_entire_file(char *file_name) {
+
+DEBUG_PLATFORM_FREE_FILE_MEMORY(dbg_platform_free_file_memory) {
+  if(memory) {
+    VirtualFree(memory, 0, MEM_RELEASE);
+  }
+}
+
+DEBUG_PLATFORM_READ_ENTIRE_FILE(dbg_platform_read_entire_file) {
   DebugFileReadResult result = {};
 
   HANDLE file_handle = CreateFileA(
@@ -150,61 +151,49 @@ debug_platform_read_entire_file(char *file_name) {
     0
   );
 
-  if (file_handle != INVALID_HANDLE_VALUE) {
-    LARGE_INTEGER file_size;
-
-    if(GetFileSizeEx(file_handle, &file_size)) {
-      result.contents = VirtualAlloc(
-        0, 
-        file_size.QuadPart, 
-        MEM_RESERVE | MEM_COMMIT, 
-        PAGE_READWRITE
-      );
-
-      if (result.contents) {
-        DWORD bytes_read;
-
-        if (ReadFile(
-          file_handle,
-          result.contents,
-          file_size.QuadPart,
-          &bytes_read,
-          0
-        )) {
-          // TODO - implement success file read
-          result.contents_size = (uint32_t)file_size.QuadPart;
-        }
-        else {
-          debug_platform_free_file_memory(result.contents);
-          result.contents = 0;
-        }
-      }
-      else {
-        // TODO - log error
-      }
-    }
-    else {
-      // TODO - log error
-    }
-
-    CloseHandle(file_handle);
+  if (file_handle == INVALID_HANDLE_VALUE) {
+    // TODO - Log error
+    return result;
   }
-  else {
-    // TODO - log error
+
+  LARGE_INTEGER file_size;
+
+  if(!GetFileSizeEx(file_handle, &file_size)) {
+    // TODO - Log error
+    return result;
   }
+
+  u32 file_size_32 = u64_safe_truncate_to_u32(file_size.QuadPart);
+  result.contents = VirtualAlloc(
+    0, 
+    file_size_32, 
+    MEM_RESERVE | MEM_COMMIT, 
+    PAGE_READWRITE
+  );
+
+  if (!result.contents) {
+    // TODO - Log error
+    return result;
+  }
+
+  DWORD bytes_read;
+
+  // ReadFile's 3rd arg is a u32. If the QuadPart is > 4GB, then it'll fail, but this is unlikely
+  if (ReadFile(file_handle, result.contents, file_size_32, &bytes_read, 0) && file_size_32 == bytes_read) {
+    // TODO - implement success file read
+    result.contents_size = (u32)file_size.QuadPart;
+  } else {
+    dbg_platform_free_file_memory(thread_ctx, result.contents);
+    result.contents = 0;
+  }
+
+  CloseHandle(file_handle);
 
   return(result);
 }
 
-static void 
-debug_platform_free_file_memory(void *memory) {
-  if(memory) {
-    VirtualFree(memory, 0, MEM_RELEASE);
-  }
-}
 
-static bool 
-debug_platform_write_entire_file(char *file_name, uint32_t memory_size, void *memory) {
+DEBUG_PLATFORM_WRITE_ENTIRE_FILE(dbg_platform_write_entire_file) {
   bool result = false;
 
   HANDLE file_handle = CreateFileA(
@@ -244,22 +233,18 @@ debug_platform_write_entire_file(char *file_name, uint32_t memory_size, void *me
 
 // TODO - Figure out how to deal with passing const char * string literals
 // into functions
-inline FILETIME
-win32_get_last_write_time(char *file_path) {
+inline FILETIME win32_get_last_write_time(char *file_path) {
   FILETIME last_write_time = {};
-  WIN32_FIND_DATA find_data;
-  HANDLE find_handle = FindFirstFile(file_path, &find_data);
 
-  if (find_handle != INVALID_HANDLE_VALUE) {
-    last_write_time = find_data.ftLastWriteTime;
-    FindClose(find_handle);
+  WIN32_FILE_ATTRIBUTE_DATA file_data;
+  if (GetFileAttributesEx(file_path, GetFileExInfoStandard, &file_data)) {
+    last_write_time = file_data.ftLastWriteTime;
   }
 
   return last_write_time;
 }
 
-static Win32GameCode
-win32_load_game_code(char *source_dll_name, char *temp_dll_name) {
+static Win32GameCode win32_load_game_code(char *source_dll_name, char *temp_dll_name) {
   Win32GameCode function_pointers = {};
   CopyFile(source_dll_name, temp_dll_name, FALSE);
   function_pointers.dll = LoadLibraryA(temp_dll_name);
@@ -287,8 +272,7 @@ win32_load_game_code(char *source_dll_name, char *temp_dll_name) {
 }
 
 // Unloads the live-loaded game code dll
-static void
-win32_unload_game_code(Win32GameCode *game_code) {
+static void win32_unload_game_code(Win32GameCode *game_code) {
   if (game_code->dll) {
     FreeLibrary(game_code->dll);
     game_code->dll = 0;
@@ -299,10 +283,16 @@ win32_unload_game_code(Win32GameCode *game_code) {
   game_code->get_sound_samples = game_get_sound_samples_stub;
 }
 
+static void win32_load_xinput(void) {
+  HMODULE xinput_lib = LoadLibraryA("xinput1_3.dll");
+  if (xinput_lib) {
+    XInputGetState = (x_input_get_state *)GetProcAddress(xinput_lib, "XInputGetState");
+    XInputSetState = (x_input_set_state *)GetProcAddress(xinput_lib, "XInputSetState");
+  }
+}
 
 
-static void 
-win32_process_keyboard_message(
+static void win32_process_keyboard_message(
     GameButtonState *new_button_state,
     bool is_down
 ) {
@@ -311,8 +301,7 @@ win32_process_keyboard_message(
 }
 
 
-static void 
-win32_process_x_input_button(
+static void win32_process_x_input_button(
     DWORD x_input_button_state,
     DWORD button_bit, 
     GameButtonState *old_button_state,
@@ -324,8 +313,8 @@ win32_process_x_input_button(
 }
 
 
-static void 
-Win32ClearSoundBuffer(Win32SoundOutput *sound_output) {
+/* Zeroes out the sound buffer */
+static void Win32ClearSoundBuffer(Win32SoundOutput *sound_output) {
 	VOID *region1;
 	DWORD region1_size;
 	VOID *region2;
@@ -339,13 +328,13 @@ Win32ClearSoundBuffer(Win32SoundOutput *sound_output) {
 	);
 
 	if(SUCCEEDED(buffer_lock_result)) {
-		uint8_t *destination_sample = (uint8_t *)region1;
+		u8 *destination_sample = (u8 *)region1;
 
 		for(DWORD byte_index = 0; byte_index < region1_size; ++byte_index) {
 			*destination_sample++ = 0;
 		}
 		
-    destination_sample = (uint8_t *)region2;
+    destination_sample = (u8 *)region2;
 
 		for(DWORD byte_index = 0; byte_index < region2_size; ++byte_index) {
 			*destination_sample++ = 0;
@@ -362,7 +351,7 @@ Win32ClearSoundBuffer(Win32SoundOutput *sound_output) {
 
 static void Win32FillSoundBuffer(
     Win32SoundOutput *sound_output, 
-    DWORD byte_to_lock, 
+    DWORD byte_to_lock, // This is essentially the write pointer
     DWORD bytes_to_write,
     GameSoundOutputBuffer *source_buffer
 ) {
@@ -371,6 +360,11 @@ static void Win32FillSoundBuffer(
 	VOID *region2;
 	DWORD region2_size;
 
+
+  // When you lock the circiular secondary sound buffer, Windows returns either one
+  // or two chunks of memory. If the locked region hits the "end" of the circular buffer
+  // and wraps around to the "beginning", you'll get two regions. Otherwise you're locking
+  // a region without wrapping.
 	HRESULT buffer_lock_result = GlobalSecondarySoundBuffer->Lock(
 			byte_to_lock,
 			bytes_to_write,
@@ -382,8 +376,8 @@ static void Win32FillSoundBuffer(
 	if(SUCCEEDED(buffer_lock_result)) {
 		DWORD region1_sample_count = region1_size / sound_output->bytes_per_sample;
 
-		int16_t *destination_sample = (int16_t *)region1;
-    int16_t *source_sample = source_buffer->samples;
+		i16 *destination_sample = (i16 *)region1;
+    i16 *source_sample = source_buffer->samples;
 
 		for(DWORD sample_index = 0; sample_index < region1_sample_count; ++sample_index) {
 			*destination_sample++ = *source_sample++;
@@ -394,7 +388,7 @@ static void Win32FillSoundBuffer(
 		
 
 		DWORD region2_sample_count = region2_size / sound_output->bytes_per_sample;
-		destination_sample = (int16 *)region2;
+		destination_sample = (i16 *)region2;
 
 		for(DWORD sample_index = 0; sample_index < region2_sample_count; ++sample_index) {
 			*destination_sample++ = *source_sample++;
@@ -413,7 +407,7 @@ static void Win32FillSoundBuffer(
 
 // DIRECTSOUND pointer is written into as an OUT param as the second parameter of
 // DirectSoundCreate().
-static void Win32InitDirectSound(HWND window, int32 samples_per_second, int32 buffer_size) {
+static void Win32InitDirectSound(HWND window, i32 samples_per_second, i32 buffer_size) {
 	LPDIRECTSOUND direct_sound;
 
 	if(SUCCEEDED(DirectSoundCreate(0, &direct_sound, 0))) {
@@ -456,6 +450,7 @@ static void Win32InitDirectSound(HWND window, int32 samples_per_second, int32 bu
 		secondary_buffer_description.dwFlags = 0;
 		secondary_buffer_description.dwBufferBytes = buffer_size;
 		secondary_buffer_description.lpwfxFormat = &wave_format;
+
 		HRESULT secondary_buffer_result = direct_sound->CreateSoundBuffer(
 				&secondary_buffer_description,
 				&GlobalSecondarySoundBuffer,
@@ -516,7 +511,7 @@ static void Win32DisplayBufferInWindow(
 ) {
 	StretchDIBits(
 		device_context,
-		0, 0, window_width, window_height,
+		0, 0, buffer->width, buffer->height,
 		0, 0, buffer->width, buffer->height,
 		buffer->memory,
 		&buffer->info,
@@ -578,8 +573,7 @@ LRESULT CALLBACK  Win32MainWindowCallback(
 	return(Result);
 };
 
-static void
-win32_process_pending_messages(Win32State *win32_state, GameControllerInput *keyboard_controller) {
+static void win32_process_pending_messages(Win32State *win32_state, GameControllerInput *keyboard_controller) {
   MSG message;
 
   while(PeekMessage(&message, 0, 0, 0, PM_REMOVE)) {
@@ -592,7 +586,7 @@ win32_process_pending_messages(Win32State *win32_state, GameControllerInput *key
       case WM_SYSKEYUP:
       case WM_KEYDOWN:
       case WM_KEYUP: {
-        uint32_t keycode = (uint32_t)message.wParam;
+        u32 keycode = (u32)message.wParam;
         bool was_down = ((message.lParam & (1 << 30)) != 0); // Get bit 30 of LParam
         bool is_down = ((message.lParam & (1 << 31)) == 0); // Get bit 31 of LParam
 
@@ -683,13 +677,12 @@ win32_process_pending_messages(Win32State *win32_state, GameControllerInput *key
 
 // Draws a vertical tic-mark at the x position between two y positions in the buffer.
 // Kind of like a line, but not exactly.
-static void
-win32_debug_draw_vertical(
+static void win32_debug_draw_vertical(
     Win32OffScreenBuffer *back_buffer, 
     int x, 
     int top, 
     int bottom,
-    uint32_t color
+    u32 color
   ) {
   if (top <= 0) {
     top = 0;
@@ -699,7 +692,7 @@ win32_debug_draw_vertical(
     bottom = back_buffer->height;
   }
 
-  if (x >=0 && x < back_buffer->width) {
+  if (x >= 0 && x < back_buffer->width) {
     uint8_t *pixel =  (uint8_t *)back_buffer->memory + 
         (x * back_buffer->bytes_per_pixel) + 
         (top * back_buffer->pitch);
@@ -713,8 +706,7 @@ win32_debug_draw_vertical(
 }
 
 // Draws a line for a sound cursor at a given x.
-inline void
-win32_draw_sound_buffer_line(
+inline void win32_draw_sound_buffer_line(
   Win32OffScreenBuffer *back_buffer,
   Win32SoundOutput *sound_output,
   float coefficient,
@@ -722,22 +714,21 @@ win32_draw_sound_buffer_line(
   int top,
   int bottom,
   DWORD cursor_pos,
-  uint32_t color
+  u32 color
 ) {
-    float x = coefficient * (float)cursor_pos;
+    f32 x = coefficient * (f32)cursor_pos;
     int x_with_pad = pad_x + (int)x;
     win32_debug_draw_vertical(back_buffer, x_with_pad, top, bottom, color);
 }
 
 // Draw lines where sound play and write cursors occur
-static void
-win32_debug_sync_display(
+static void win32_debug_sync_display(
   Win32OffScreenBuffer *back_buffer,
   int sound_cursor_count,
   int current_cursor_index,
   Win32DebugSoundCursor *debug_sound_cursors,
   Win32SoundOutput *sound_output,
-  float target_seconds_per_frame
+  f32 target_seconds_per_frame
 ) {
 
   int pad_x = 16;
@@ -745,22 +736,30 @@ win32_debug_sync_display(
   int line_height = 64;
 
   // Maps sound buffer position to video pixels with some padding 
-  float coefficient = (float)(back_buffer->width - 2 * pad_x) / (float)sound_output->secondary_buffer_size;
+  f32 coefficient = (f32)(back_buffer->width - 2 * pad_x) / (f32)sound_output->secondary_buffer_size;
 
-  for(int sound_cursor_idx = 0;
-      sound_cursor_idx < sound_cursor_count;
-      ++sound_cursor_idx) 
+  for(int sound_cursor_idx = 0; sound_cursor_idx < sound_cursor_count; ++sound_cursor_idx) 
   {
     Win32DebugSoundCursor *current_sound_cursor = &debug_sound_cursors[sound_cursor_idx];
 
+    Assert(current_sound_cursor->output_play_cursor < sound_output->secondary_buffer_size);
+    Assert(current_sound_cursor->output_write_cursor< sound_output->secondary_buffer_size);
+    Assert(current_sound_cursor->output_location < sound_output->secondary_buffer_size);
+    Assert(current_sound_cursor->output_byte_count < sound_output->secondary_buffer_size);
+    Assert(current_sound_cursor->flip_play_cursor < sound_output->secondary_buffer_size);
+    Assert(current_sound_cursor->flip_write_cursor < sound_output->secondary_buffer_size);
+
     DWORD play_color = 0xFFFFFFFF;
     DWORD write_color = 0xFFFF0000;
+    DWORD expected_frame_clip_color = 0xFFFFFF00;
 
     int top = pad_y;
     int bottom = pad_y + line_height;
+    
     if (sound_cursor_idx == current_cursor_index) {
       top += pad_y + line_height;
       bottom += pad_y + line_height;
+      int first_top = top;
 
       win32_draw_sound_buffer_line(
           back_buffer, 
@@ -811,6 +810,17 @@ win32_debug_sync_display(
       
       top += pad_y + line_height;
       bottom += pad_y + line_height;
+
+      win32_draw_sound_buffer_line(
+          back_buffer, 
+          sound_output, 
+          coefficient, 
+          pad_x, 
+          first_top, 
+          bottom, 
+          current_sound_cursor->expected_flip_play_cursor,
+          expected_frame_clip_color
+      );
     }
        
     win32_draw_sound_buffer_line(
@@ -837,35 +847,35 @@ win32_debug_sync_display(
   }
 }
 
-static float
-win32_process_input_stick_value(SHORT thumbstick, float deadzone_threshold) {
-  float result = 0;
+// Map the thumbstick values [-1..1] and account for deadzone. Values inside the (SQUARE) deadzone
+// are not included in the map. Once outside the deadzone, the values will go -1..0 and 0..1.
+// Otherwise including the deadzone in the map would mean values would start at 0 and then jump
+// to something like 0.2 once the deadzone is exited.
+static f32 win32_process_input_stick_value(SHORT thumbstick, f32 deadzone_threshold) {
+  f32 result = 0;
   if(thumbstick < -deadzone_threshold) {
-    result = (float)thumbstick / 32768.0f;
-  } else if (thumbstick > deadzone_threshold){
-    result = (float)thumbstick / 32767.0f;
+    result = (f32)((f32)thumbstick + deadzone_threshold) / (32768.0f - deadzone_threshold);
+  } else if (thumbstick > deadzone_threshold) {
+    result = (f32)((f32)thumbstick + deadzone_threshold) / (32767.0f - deadzone_threshold);
   }
 
   return result;
 }
 
 
-static float
-win32_get_seconds_elapsed(LARGE_INTEGER start, LARGE_INTEGER end) {
-  float delta = (float)(end.QuadPart - start.QuadPart);
-  float elapsed_seconds = delta / (float)GlobalPerfCounterFrequency;
+static float win32_get_seconds_elapsed(LARGE_INTEGER start, LARGE_INTEGER end) {
+  f32 delta = (f32)(end.QuadPart - start.QuadPart);
+  f32 elapsed_seconds = delta / (f32)GlobalPerfCounterFrequency;
   return elapsed_seconds;
 }
 
-static LARGE_INTEGER
-win32_get_wall_clock(void) {
+static LARGE_INTEGER win32_get_wall_clock(void) {
   LARGE_INTEGER counter;
   QueryPerformanceCounter(&counter);
   return counter;
 }
 
-static void
-concat_strings(
+static void concat_strings(
     int source_one_count, char *source_one,
     int source_two_count, char *source_two,
     int destination_count, char *destination)
@@ -879,7 +889,6 @@ concat_strings(
   }
 
   *destination++ = 0;
-
 }
 
 
@@ -889,6 +898,7 @@ int CALLBACK WinMain(
 	LPSTR lpCmdLine,
 	int nCmdShow
 ) {
+  // TODO - MAX_PATH is dangerous and shouldn't be used in production code.
   // Get path of where this executable is running
   char exe_file_name[MAX_PATH];
   DWORD size_of_filename = GetModuleFileNameA(0, exe_file_name, sizeof(exe_file_name));
@@ -898,6 +908,8 @@ int CALLBACK WinMain(
       one_past_last_slash = scan + 1;
     }
   }
+
+  win32_load_xinput();
 
   char source_game_code_dll_filename[] = "handmade.dll";
   char source_game_code_dll_full_path[MAX_PATH];
@@ -929,6 +941,7 @@ int CALLBACK WinMain(
   bool sleep_is_granular = timeBeginPeriod(1) == TIMERR_NOERROR;
 
 	WNDCLASSA WindowClass = {};
+	ThreadContext thread_ctx = {};
 
 	Win32ResizeDIBSection(&GlobalBackBuffer, 1280, 720);
 
@@ -937,13 +950,6 @@ int CALLBACK WinMain(
 	WindowClass.hInstance = Instance;
 	WindowClass.lpszClassName = "HandmadeHeroWindowClass";
 
-  // Fixed frame timing: 30fps
-  //int monitor_refresh_rate = 60;
-  //int game_update_hz = monitor_refresh_rate / 2;
-#define monitor_refresh_rate 60
-  //#define frames_of_audio_latency 4
-#define game_update_hz (monitor_refresh_rate / 2)
-  float target_seconds_per_frame = 1.0f / (float)game_update_hz;
 
 	/* takes pointer to WindowClass */
 	if (RegisterClass(&WindowClass)) {
@@ -963,15 +969,37 @@ int CALLBACK WinMain(
 		);
 
 		if (window) {
+		  HDC refresh_dc= GetDC(window);
+      int monitor_refresh_rate = 60;
+      int win32_refresh_rate = GetDeviceCaps(refresh_dc, VREFRESH);
+
+      if (win32_refresh_rate > 1) {
+        monitor_refresh_rate = win32_refresh_rate;
+      }
+
+    // These have to be defines because it is eventually used in sizing an array
+      f32 game_update_hz = (f32)(monitor_refresh_rate / 2.0f);
+      f32 target_seconds_per_frame = 1.0f / (f32)game_update_hz;
+
+      ReleaseDC(window, refresh_dc);
+
+			char refresh_rate_string_buffer[256];
+			_snprintf_s(
+				refresh_rate_string_buffer, 
+        sizeof(refresh_rate_string_buffer),
+				"%dhz is the monitor refresh rate\n", 
+				monitor_refresh_rate
+			);
+			OutputDebugStringA(refresh_rate_string_buffer);
+      
+
 		  HDC device_context = GetDC(window);
 
 			Win32SoundOutput sound_output = {};
 			sound_output.samples_per_second = 48000;
 			sound_output.running_sample_index = 0;
-			sound_output.bytes_per_sample = sizeof(int16_t) * 2;
-      sound_output.safety_bytes = (sound_output.samples_per_second * 
-          sound_output.bytes_per_sample / 
-          game_update_hz / 4);
+			sound_output.bytes_per_sample = sizeof(i16) * 2; // Two channel audio
+      sound_output.safety_bytes = (int)(((f32)sound_output.samples_per_second * (f32)sound_output.bytes_per_sample / game_update_hz) / 1.0f);
 			sound_output.secondary_buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample;
       sound_output.latency_sample_count = sound_output.samples_per_second / game_update_hz;
 
@@ -979,9 +1007,9 @@ int CALLBACK WinMain(
       Win32ClearSoundBuffer(&sound_output);
 			GlobalSecondarySoundBuffer->Play(0, 0, DSBPLAY_LOOPING);
 
-      int16_t *samples = (int16_t *)VirtualAlloc(
+      i16 *samples = (i16 *)VirtualAlloc(
         0, 
-        sound_output.secondary_buffer_size, 
+        sound_output.secondary_buffer_size,
         MEM_RESERVE|MEM_COMMIT, 
         PAGE_READWRITE
       );
@@ -998,7 +1026,11 @@ int CALLBACK WinMain(
 
       GameMemory game_memory = {};
       game_memory.permanent_storage_size = 64 * 1024 * 1024; // 64MB
-      game_memory.transient_storage_size = (uint64_t)4 * 1024 * 1024 * 1024; // 4GB
+      game_memory.transient_storage_size = (u64)4 * 1024 * 1024 * 1024; // 4GB
+      game_memory.dbg_platform_free_file_memory = dbg_platform_free_file_memory;
+      game_memory.dbg_platform_read_entire_file = dbg_platform_read_entire_file;
+      game_memory.dbg_platform_write_entire_file = dbg_platform_write_entire_file;
+      
       win32_state.game_memory_total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size;
 
       win32_state.game_memory = VirtualAlloc(
@@ -1028,7 +1060,7 @@ int CALLBACK WinMain(
 
       // Initialize sound cursor tracking
       int debug_sound_cursor_idx = 0;
-      Win32DebugSoundCursor debug_sound_cursors[game_update_hz / 2] = {0};
+      Win32DebugSoundCursor debug_sound_cursors[30] = {0};
       DWORD audio_latency_bytes = 0;
       float audio_latency_seconds = 0.0f;
       bool sound_is_valid = false;
@@ -1047,8 +1079,8 @@ int CALLBACK WinMain(
 
       // Performance counting
       LARGE_INTEGER last_counter = win32_get_wall_clock();
-			int64_t last_cycle_count = __rdtsc();
-      LARGE_INTEGER flip_wall_clock = win32_get_wall_clock();
+			u64 last_cycle_count = __rdtsc();
+      LARGE_INTEGER frame_wall_clock = win32_get_wall_clock();
 
 			while(Running) {
 
@@ -1062,8 +1094,8 @@ int CALLBACK WinMain(
           );
         }
 
-        GameControllerInput *old_keyboard_controller = &old_input->controllers[0];
-        GameControllerInput *new_keyboard_controller = &new_input->controllers[0];
+        GameControllerInput *old_keyboard_controller = get_controller(old_input, 0);
+        GameControllerInput *new_keyboard_controller = get_controller(new_input, 0);
         GameControllerInput zeroed_controller = {};
         *new_keyboard_controller = zeroed_controller;
         new_keyboard_controller->is_connected = true;
@@ -1085,19 +1117,21 @@ int CALLBACK WinMain(
 
 				for(DWORD controller_idx = 0; controller_idx < max_controller_count; ++controller_idx) 
 				{
+				  // keyboard is controller_idx 0, so add 1 for processing all other inputs
           DWORD our_controller_idx = controller_idx + 1;
-          GameControllerInput *old_controller = &old_input->controllers[our_controller_idx];
-          GameControllerInput *new_controller = &new_input->controllers[our_controller_idx];
+          GameControllerInput *old_controller = get_controller(old_input, our_controller_idx);
+          GameControllerInput *new_controller = get_controller(new_input, our_controller_idx);
 
 
 					XINPUT_STATE controller_state;
-					if(XInputGetState(controller_idx, &controller_state) == 
-            ERROR_SUCCESS) { // indicates the controller is plugged-in
+
+				  // indicates the controller is plugged-in
+					if (XInputGetState(controller_idx, &controller_state) == ERROR_SUCCESS) {
 
 						XINPUT_GAMEPAD *gamepad = &controller_state.Gamepad;
 
-            new_controller->is_analog = true;
             new_controller->is_connected = true;
+            new_controller->is_analog = old_controller->is_analog;
 
             new_controller->avg_stick_x = win32_process_input_stick_value(
               gamepad->sThumbLX,
@@ -1108,21 +1142,29 @@ int CALLBACK WinMain(
               XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE
             );
 
+            if ((new_controller->avg_stick_x != 0.0f) || (new_controller->avg_stick_y != 0.0f)) {
+              new_controller->is_analog = true;
+            }
+
 
             if(gamepad->wButtons & XINPUT_GAMEPAD_DPAD_UP) {
               new_controller->avg_stick_y = 1.0f;
+              new_controller->is_analog = false;
             }
             if(gamepad->wButtons & XINPUT_GAMEPAD_DPAD_DOWN) {
               new_controller->avg_stick_y = -1.0f;
+              new_controller->is_analog = false;
             }
             if(gamepad->wButtons & XINPUT_GAMEPAD_DPAD_LEFT) {
               new_controller->avg_stick_x = -1.0f;
+              new_controller->is_analog = false;
             }
             if(gamepad->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) {
               new_controller->avg_stick_x = 1.0f;
+              new_controller->is_analog = false;
             }
 
-            float threshold = 0.5f;
+            f32 threshold = 0.5f;
             win32_process_x_input_button(
               (new_controller->avg_stick_x < -threshold) ? 1 : 0,
               1,
@@ -1241,18 +1283,53 @@ int CALLBACK WinMain(
           win32_playback_input(&win32_state, new_input);
         }
 
-				game_code.update_and_render(&game_memory, new_input, &game_offscreen_buffer);
+				game_code.update_and_render(&thread_ctx, &game_memory, new_input, &game_offscreen_buffer);
 
        
+        /*
+            Audio latency
+            ---------------
+            Low Latency Audio =)
+              The write cursor falls within the leftover frame time.
+              Move audio write up to the frame boundary and write one frame's worth of audio.
+              We will have to check how much the write cursor has moved every frame
+              Basically always writing one frame or average WC amount
 
-        // Start setting up sound buffer
-        // Compensate for sound cards with different latencies.
-        // Look at how far away the write cursor is away from the play cursor
-        // as well as where in the frame the cursors are. Decide to write
-        // to the next frame boundary or further ahead with some safety margin
-        // past the next frame boundary.
+              Round up to frame boundary from where write cursor is projected.
+              Find where write cursor is. If it is inside the frame boundary - there is time left before the frame ends.
+              Project the write cursor forward with wc + samples per frame.
+              The target is the next expected frame boundary.
+
+
+              ___CURRENT FRAME____|
+                              ~~~~~~~~WRITE AUDIO~~~~~~|
+                                   __FOLLOWING FRAME___|
+                                                 ~~~~~~~~~WRITE NEXT AUDIO~~|
+                                                 |-OVW-| (overwrite - Play cursor hasn't gotten here yet)
+
+              |-------P------W----|------P2------W2----|--------------------|---->
+              
+              
+
+            High Latency Audio =(
+              The write cursor will fall in the following frame which we aren't yet computing.
+              We will write up to the next frame and then also to where we EXPECT the next WC to be.
+              Add some safety margin past that because the next WC may be a little earlier or a little later.
+              WC + frame samples + safety margin (probably a few samples 1-2ms)
+
+              ___CURRENT FRAME____|
+                                    ~~~~~~~~~~~~~~~~~~~|~~~SM~~~| (write up to the next frame plus some safety margin incase the next WC doesn't fall exactly where we expect)
+
+                                   __FOLLOWING FRAME___|
+                                                          |~~OVW~~~~~~~~~~~~|~~~SM~~~|
+
+              |-------P-----------|--W---P2------------|--W2----------------|---------------->
+
+            
+        */
         LARGE_INTEGER audio_wall_clock = win32_get_wall_clock();
-        float frame_begin_audio_seconds_delta = win32_get_seconds_elapsed(flip_wall_clock, audio_wall_clock);
+        f32 frame_begin_to_audio_seconds_delta = win32_get_seconds_elapsed(frame_wall_clock, audio_wall_clock);
+
         DWORD play_cursor;
         DWORD write_cursor;
         HRESULT sound_buffer_position_result = GlobalSecondarySoundBuffer->GetCurrentPosition(
@@ -1270,11 +1347,29 @@ int CALLBACK WinMain(
 					DWORD byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % 
               sound_output.secondary_buffer_size;
 
-          DWORD expected_sound_bytes_per_frame = (sound_output.samples_per_second *
-            sound_output.bytes_per_sample) / game_update_hz;
-          
-          float seconds_left_until_flip = target_seconds_per_frame - frame_begin_audio_seconds_delta;
-          float audio_frame_ratio = seconds_left_until_flip / target_seconds_per_frame;
+          DWORD expected_sound_bytes_per_frame = (DWORD)(((f32)sound_output.samples_per_second *
+            (f32)sound_output.bytes_per_sample) / game_update_hz);
+
+          f32 seconds_left_until_frame_end = target_seconds_per_frame - frame_begin_to_audio_seconds_delta;
+          if (seconds_left_until_frame_end < 0.0) {
+            // DWORD is a u32. When the window is clicked and dragged, this is causing the seconds_left_until_frame_end
+            // to go negative. After the computation is complete, the cast to DWORD is an invalid operation.
+            // clamp to 0.0 for now....
+            seconds_left_until_frame_end = 0.0;
+          }
+
+          DWORD expected_bytes_until_frame_end =
+            (DWORD)((seconds_left_until_frame_end / target_seconds_per_frame) * (f32)expected_sound_bytes_per_frame);
+
+          // Add buffer size when write cursor wraps around and is behind the play cursor
+          DWORD unwrapped_write_cursor = write_cursor;
+          if (unwrapped_write_cursor < play_cursor) {
+            unwrapped_write_cursor += sound_output.secondary_buffer_size;
+          }
+
+          audio_latency_bytes = unwrapped_write_cursor - play_cursor;
+          f32 samples_between_cursors = (f32)audio_latency_bytes / (f32)sound_output.bytes_per_sample;
+          audio_latency_seconds = samples_between_cursors / (f32)sound_output.samples_per_second;
 
           // TODO!!!!!
           // This expected_bytes_until_flip calculation is blowing up when declared as a DWORD and the screen is resizing.
@@ -1295,7 +1390,7 @@ int CALLBACK WinMain(
           DWORD expected_bytes_until_flip = 0;
 
           DWORD expected_frame_boundary_byte = play_cursor + expected_sound_bytes_per_frame;
-          DWORD safe_write_cursor = write_cursor + sound_output.safety_bytes;
+          DWORD safe_write_cursor = unwrapped_write_cursor + sound_output.safety_bytes;
           bool audio_card_is_latent = safe_write_cursor >= expected_frame_boundary_byte;
           DWORD target_cursor = 0;
 
@@ -1306,7 +1401,6 @@ int CALLBACK WinMain(
           }
 
           target_cursor = target_cursor % sound_output.secondary_buffer_size;
-
 
           DWORD bytes_to_write = 0;
 					if(byte_to_lock > target_cursor) {
@@ -1322,7 +1416,7 @@ int CALLBACK WinMain(
           sound_buffer.samples_per_second = sound_output.samples_per_second;
           sound_buffer.sample_count = bytes_to_write / sound_output.bytes_per_sample;
           sound_buffer.samples = samples;
-          game_code.get_sound_samples(&game_memory, &sound_buffer);
+          game_code.get_sound_samples(&thread_ctx, &game_memory, &sound_buffer);
 
           // Debug Sound stuff
           Win32DebugSoundCursor *sound_cursor = &debug_sound_cursors[debug_sound_cursor_idx];
@@ -1332,15 +1426,15 @@ int CALLBACK WinMain(
           sound_cursor->output_byte_count = bytes_to_write;
           sound_cursor->expected_flip_play_cursor = expected_frame_boundary_byte;
 
-          DWORD unwrapped_write_cursor = write_cursor;
+          // DWORD unwrapped_write_cursor = write_cursor;
 
-          // Add buffer size when write cursor wraps around and is behind the play cursor
-          if (unwrapped_write_cursor < play_cursor) {
-            unwrapped_write_cursor += sound_output.secondary_buffer_size;
-          }
-          audio_latency_bytes = unwrapped_write_cursor - play_cursor;
-          float samples_between_cursors = (float)audio_latency_bytes / (float)sound_output.bytes_per_sample;
-          audio_latency_seconds = samples_between_cursors / (float)sound_output.samples_per_second;
+          // // Add buffer size when write cursor wraps around and is behind the play cursor
+          // if (unwrapped_write_cursor < play_cursor) {
+          //   unwrapped_write_cursor += sound_output.secondary_buffer_size;
+          // }
+          // audio_latency_bytes = unwrapped_write_cursor - play_cursor;
+          // f32 samples_between_cursors = (f32)audio_latency_bytes / (f32)sound_output.bytes_per_sample;
+          // audio_latency_seconds = samples_between_cursors / (f32)sound_output.samples_per_second;
           // End Debug Sound Stuff
 
           Win32FillSoundBuffer(&sound_output, byte_to_lock, bytes_to_write, &sound_buffer);
@@ -1348,23 +1442,24 @@ int CALLBACK WinMain(
           sound_is_valid = false;
         }
 
-        
 
-
-
-
-        // compute target FPS
+        /*
+          WAIT TIME
+          --------
+          This is the leftover time until the frame ends.
+          Sleep if we can so we don't burn processor time.
+        */
         LARGE_INTEGER work_counter = win32_get_wall_clock();
-        float seconds_elapsed_for_work = win32_get_seconds_elapsed(last_counter, work_counter);
-        float seconds_elapsed_for_frame = seconds_elapsed_for_work;
+        f32 seconds_elapsed_for_work = win32_get_seconds_elapsed(last_counter, work_counter);
+        f32 seconds_elapsed_for_frame = seconds_elapsed_for_work;
 
         if (seconds_elapsed_for_frame < target_seconds_per_frame) {
           while (seconds_elapsed_for_frame < target_seconds_per_frame) {
             if (sleep_is_granular) {
-              DWORD sleep_ms = (DWORD)(1000.0f * 
-                (target_seconds_per_frame - seconds_elapsed_for_frame));
+              DWORD sleep_ms = (DWORD)(1000.0f * (target_seconds_per_frame - seconds_elapsed_for_frame));
 
               if (sleep_ms > 0) {
+                // Avoid burning cycles in a spin cycle
                 Sleep(sleep_ms);
               }
             }
@@ -1373,12 +1468,14 @@ int CALLBACK WinMain(
             }
           }
         } else {
-          // TODO: Missed frame rate, need to log
+          // TODO: Missed frame rate, need to LOG
         }
+
+        
         
 				// Close time window
         LARGE_INTEGER end_counter = win32_get_wall_clock();
-        float ms_per_frame = 1000.0f * win32_get_seconds_elapsed(last_counter, end_counter);
+        f32 ms_per_frame = 1000.0f * win32_get_seconds_elapsed(last_counter, end_counter);
 				last_counter = end_counter;
 
         // Blit to screen after frame rate calculations
@@ -1400,14 +1497,14 @@ int CALLBACK WinMain(
 					dimension.height
 				);
         
-        flip_wall_clock = win32_get_wall_clock();
+        // This marks the end of the frame
+        frame_wall_clock = win32_get_wall_clock();
 
         //For debugging sound cursors
         sound_buffer_position_result = GlobalSecondarySoundBuffer->GetCurrentPosition(
           &play_cursor,
           &write_cursor
         );
-        
 
         if (SUCCEEDED(sound_buffer_position_result)) {
           if (!sound_is_valid) {
@@ -1419,12 +1516,11 @@ int CALLBACK WinMain(
         }
 
         Win32DebugSoundCursor *debug_sound_cursor = &debug_sound_cursors[debug_sound_cursor_idx];
-
         debug_sound_cursor->flip_play_cursor = play_cursor;
         debug_sound_cursor->flip_write_cursor = write_cursor;
-
         // End debugging sound cursors
 
+        // Swap game inputs
         GameInput *temp = new_input;
         new_input = old_input;
         old_input = temp;
@@ -1435,8 +1531,8 @@ int CALLBACK WinMain(
        
 				//int32_t elapsed_millis = (int32_t)((1000 * elapsed_counter) / perf_counter_frequency.QuadPart);
         //int32_t fps = perf_counter_frequency.QuadPart / elapsed_counter;
-        float fps = 0.0f;
-				double mega_cycles_per_frame = (float)(elapsed_cycles / (1000.0f * 1000.0f));
+        f32 fps = 0.0f;
+				f64 mega_cycles_per_frame = (f64)(elapsed_cycles / (1000.0 * 1000.0));
 
 				char string_buffer[256];
 				_snprintf_s(
@@ -1464,6 +1560,6 @@ int CALLBACK WinMain(
 		// TODO: Handle Failure of window creation
 	}
 	
-	return(0);
+	return 0;
 }
 

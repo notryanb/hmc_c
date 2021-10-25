@@ -1,5 +1,13 @@
-
 #if !defined(WIN32_HANDMADE_H)
+#define WIN32_HANDMADE_H
+
+/*
+  Data Structures
+*/
+// struct DebugFileReadResult {
+//   u32 contents_size;
+//   void *contents;
+// };
 
 // Holds function pointers imported for live-loading game code.
 struct Win32GameCode {
@@ -30,12 +38,12 @@ struct Win32DebugSoundCursor {
 };
 
 struct Win32SoundOutput {
-	int samples_per_second;
-	uint32_t running_sample_index;
-	int bytes_per_sample;
 	DWORD secondary_buffer_size;
   DWORD safety_bytes;
+	int samples_per_second;
+	int bytes_per_sample;
   int latency_sample_count;
+	u32 running_sample_index;
 };
 
 
@@ -55,7 +63,7 @@ struct Win32WindowDimension {
 
 struct Win32State {
   // indicates the size of the game memory chunk
-  uint64_t game_memory_total_size;
+  u64 game_memory_total_size;
 
   // pointer to the game memory address
   void *game_memory;
@@ -74,5 +82,13 @@ struct Win32State {
 };
 
 
-#define WIN32_HANDMADE_H
+
+/*
+   Functions
+*/
+// static DebugFileReadResult debug_platform_read_entire_file(char *file_name);
+// static void debug_platform_free_file_memory(void *memory);
+// static bool debug_platform_write_entire_file(char *file_name, u32 memory_size, void *memory);
+
+
 #endif

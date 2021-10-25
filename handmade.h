@@ -1,42 +1,69 @@
+#if !defined(HANDMADE_H)
+#define HANDMADE_H
+
 #include <math.h>
 #include <stdint.h>
+#include <stdbool.h>
 
+/*
+  Constants / typedefs
+*/
 #define internal_function static
 #define local_persist static
 #define global_variable static
 #define Pi32 3.14159265359f
 
-typedef uint8_t uint8;
-typedef uint16_t uint16;
-typedef uint32_t uint32;
-typedef uint64_t uint64;
+#define Kilobytes(value) ((value)*1024)
+#define Megabytes(value) (Kilobytes(value)*1024)
+#define Gigabytes(value) (Megabytes(value)*1024)
+#define Terabytes(value) (Gigabytes(value)*1024)
 
-typedef int8_t int8;
-typedef int16_t int16;
-typedef int32_t int32;
-typedef int64_t int64;
+typedef uint8_t u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef uint64_t u64;
 
-typedef float real32;
-typedef double real64;
+typedef int8_t i8;
+typedef int16_t i16;
+typedef int32_t i32;
+typedef int64_t i64;
 
-//#include "handmade.h"
-//#include "handmade.cpp"
+typedef float f32;
+typedef double f64;
 
-#if !defined(HANDMADE_H)
+/*
+  HANDMADE_INTERNAL:
+    0 - Build for public release
+    1 - Build for developer only
 
-// Macros
+  HANDMADE_SLOW:
+    0 - no slow code allowed
+    1 - slow code is allowed
+*/
+
+
+/* Macros */
+
+// Gets number of items in array
 #define ArrayCount(array) (sizeof(array) / sizeof((array)[0]))
 
-struct DebugFileReadResult {
-  uint32_t contents_size;
-  void *contents;
-};
+// Assert macro for when compiling in "slow"
+// if HANDMADE_SLOW
+// #define Assert(Expression) if(!(Expression)) {*(int *)0 = 0;}
 
-DebugFileReadResult debug_platform_read_entire_file(char *file_name);
-void debug_platform_free_file_memory(void *memory);
-bool debug_platform_write_entire_file(char *file_name, uint32_t memory_size, void *memory);
+// GCC Docs: This function causes the program to exit abnormally. GCC implements this function by using a target-dependent mechanism
+// (such as intentionally executing an illegal instruction) or by calling abort.
+// The mechanism used may vary from release to release so you should not rely on any particular implementation.
+#define Assert(Expression) if(!(Expression)) {__builtin_trap();}
 
-// Data Structures
+// #else
+// #define Assert(Expression)
+// #endif
+
+/*
+  Data Structures
+*/
+
 struct GameOffScreenBuffer {
 	void *memory;
 	int width;
@@ -48,11 +75,15 @@ struct GameOffScreenBuffer {
 struct GameSoundOutputBuffer {
   int samples_per_second;
   int sample_count;
-  int16_t *samples;
+  i16 *samples;
 };
 
 struct GameButtonState {
+  // Indicates how many times a button transistioned from on->off or off->on
   int half_transition_count;
+
+  // Indicates if the button's last state is down. This initial state can be calculated
+  // from this information with the half_transition_count
   bool ended_down;
 };
 
@@ -81,48 +112,106 @@ struct GameControllerInput {
   };
 };
 
-
 struct GameInput {
   GameControllerInput controllers[5];
 };
-
 
 struct GameState {
   int tone_hz;
   int blue_offset;
   int green_offset;
-  float sine;
+  f32 sine;
 
   int player_x;
   int player_y;
-  float jump_timer;
+  f32 jump_timer;
 };
+
+/* Debug Specific */
+struct DebugFileReadResult {
+  u32 contents_size;
+  void *contents;
+};
+
+
+// Calling back into the platform layer will need this (free file memory, etc..)
+// Not every platform does a good job of returning what thread you're on.
+struct ThreadContext {
+  int placeholder;
+};
+
+
+// How this works...
+// 1 - Define the macro and what it expands to.
+//     the (name) portion allows you to put a custom name that will expand when it is used in the definition.
+//     The definition here is just a function signature where the name of the function is whatever you put into the macro.
+// 2 - the typedef actually invokes the macro. This means it'll expand the macro into code at compile time with whatever you defined.
+//     In this case, it takes 'debug_platform_free_file_memory' and then turns it into...
+//     'void debug_platform_free_file_memory(void *memory)' to be used as a function declaration.
+// 3 - Any code using this header can use that typedef'd function signature to implement the function .
+#define DEBUG_PLATFORM_FREE_FILE_MEMORY(name) void name(ThreadContext *thread_ctx, void *memory)
+typedef DEBUG_PLATFORM_FREE_FILE_MEMORY(debug_platform_free_file_memory);
+
+#define DEBUG_PLATFORM_READ_ENTIRE_FILE(name) DebugFileReadResult name(ThreadContext *thread_ctx, const char *file_name)
+typedef DEBUG_PLATFORM_READ_ENTIRE_FILE(debug_platform_read_entire_file);
+
+#define DEBUG_PLATFORM_WRITE_ENTIRE_FILE(name) bool name(ThreadContext *thread_ctx, const char *file_name, u32 memory_size, void *memory)
+typedef DEBUG_PLATFORM_WRITE_ENTIRE_FILE(debug_platform_write_entire_file);
 
 struct GameMemory {
-  bool is_initialized;
-  uint64_t permanent_storage_size;
+  u64 permanent_storage_size;
+  u64 transient_storage_size;
   void *permanent_storage;
-  uint64_t transient_storage_size;
   void *transient_storage;
+
+  // pointers to shared sebug file writing code.
+  // The type is the output of a macro which creates the function signatures
+  // The macros are used in platform code to define the functions and the function
+  // pointers are stored in the game memory so the same function can be used
+  // by both the game and the platform layer. Now the signature can be managed by the macros.
+  debug_platform_free_file_memory *dbg_platform_free_file_memory;
+  debug_platform_read_entire_file *dbg_platform_read_entire_file;
+  debug_platform_write_entire_file *dbg_platform_write_entire_file;
+
+  bool is_initialized;
 };
 
-// Fuctions
+
+
+/*
+  Functions
+*/
+// TODO - Why do I have these in the handmade header?
+// static DebugFileReadResult debug_platform_read_entire_file(char *file_name);
+// static void debug_platform_free_file_memory(void *memory);
+// static bool debug_platform_write_entire_file(char *file_name, u32 memory_size, void *memory);
 
 // Gets the controller from the GameInput and asserts the controller index
 // is in bounds
 inline GameControllerInput *get_controller(GameInput *game_input, int controller_idx) {
-  // Assert(controller_idx < ArrayCount(game_input->controllers));
+  Assert(controller_idx < ArrayCount(game_input->controllers));
   GameControllerInput *controller = &game_input->controllers[controller_idx];
   return controller;
 }
 
-#define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory,GameInput *input,GameOffScreenBuffer *buffer)
+inline u32 u64_safe_truncate_to_u32(u64 value) {
+  Assert(value <= 0xFFFFFFFF);
+  u32 result = (u32)value;
+  return result;
+}
+
+/*
+  Function stubs
+*/
+
+
+
+#define GAME_UPDATE_AND_RENDER(name) void name(ThreadContext *thread_ctx, GameMemory *memory, GameInput *input,GameOffScreenBuffer *buffer)
 typedef GAME_UPDATE_AND_RENDER(PtrGameUpdateAndRender);
 GAME_UPDATE_AND_RENDER(game_update_and_render_stub) {}
 
-#define GAME_GET_SOUND_SAMPLES(name) void name(GameMemory *game_memory,GameSoundOutputBuffer *sound_buffer)
+#define GAME_GET_SOUND_SAMPLES(name) void name(ThreadContext *thread_ctx, GameMemory *game_memory, GameSoundOutputBuffer *sound_buffer)
 typedef GAME_GET_SOUND_SAMPLES(PtrGameGetSoundSamples);
 GAME_GET_SOUND_SAMPLES(game_get_sound_samples_stub) {}
 
-#define HANDMADE_H
 #endif
