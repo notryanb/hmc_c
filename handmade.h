@@ -1,42 +1,70 @@
+#if !defined(HANDMADE_H)
+#define HANDMADE_H
+
 #include <math.h>
 #include <stdint.h>
 
+/*
+  Constants / typedefs
+*/
 #define internal_function static
 #define local_persist static
 #define global_variable static
 #define Pi32 3.14159265359f
 
-typedef uint8_t uint8;
-typedef uint16_t uint16;
-typedef uint32_t uint32;
-typedef uint64_t uint64;
+#define Kilobytes(value) ((value)*1024)
+#define Megabytes(value) (Kilobytes(value)*1024)
+#define Gigabytes(value) (Megabytes(value)*1024)
+#define Terabytes(value) (Gigabytes(value)*1024)
 
-typedef int8_t int8;
-typedef int16_t int16;
-typedef int32_t int32;
-typedef int64_t int64;
+typedef uint8_t u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef uint64_t u64;
 
-typedef float real32;
-typedef double real64;
+typedef int8_t i8;
+typedef int16_t i16;
+typedef int32_t i32;
+typedef int64_t i64;
+
+typedef float f32;
+typedef double f64;
 
 //#include "handmade.h"
 //#include "handmade.cpp"
 
-#if !defined(HANDMADE_H)
+/*
+  HANDMADE_INTERNAL:
+    0 - Build for public release
+    1 - Build for developer only
 
-// Macros
+  HANDMADE_SLOW:
+    0 - no slow code allowed
+    1 - slow code is allowed
+*/
+
+
+/* Macros */
+
+// Gets number of items in array
 #define ArrayCount(array) (sizeof(array) / sizeof((array)[0]))
 
+// Assert macro for when compiling in "slow"
+// if HANDMADE_SLOW
+#define Assert(Expression) if(!(Expression)) {*(int *)0 = 0;}
+// #else
+// #define Assert(Expression)
+// #endif
+
+
+/*
+  Data Structures
+*/
 struct DebugFileReadResult {
-  uint32_t contents_size;
+  u32 contents_size;
   void *contents;
 };
 
-static DebugFileReadResult debug_platform_read_entire_file(char *file_name);
-static void debug_platform_free_file_memory(void *memory);
-static bool debug_platform_write_entire_file(char *file_name, uint32_t memory_size, void *memory);
-
-// Data Structures
 struct GameOffScreenBuffer {
 	void *memory;
 	int width;
@@ -48,7 +76,7 @@ struct GameOffScreenBuffer {
 struct GameSoundOutputBuffer {
   int samples_per_second;
   int sample_count;
-  int16_t *samples;
+  i16 *samples;
 };
 
 struct GameButtonState {
@@ -85,32 +113,36 @@ struct GameControllerInput {
   };
 };
 
-
 struct GameInput {
   GameControllerInput controllers[5];
 };
-
 
 struct GameState {
   int tone_hz;
   int blue_offset;
   int green_offset;
-  float sine;
+  f32 sine;
 
   int player_x;
   int player_y;
-  float jump_timer;
+  f32 jump_timer;
 };
 
 struct GameMemory {
-  uint64_t permanent_storage_size;
-  uint64_t transient_storage_size;
+  u64 permanent_storage_size;
+  u64 transient_storage_size;
   void *permanent_storage;
   void *transient_storage;
   bool is_initialized;
 };
 
-// Fuctions
+
+/*
+  Functions
+*/
+static DebugFileReadResult debug_platform_read_entire_file(char *file_name);
+static void debug_platform_free_file_memory(void *memory);
+static bool debug_platform_write_entire_file(char *file_name, u32 memory_size, void *memory);
 
 // Gets the controller from the GameInput and asserts the controller index
 // is in bounds
@@ -128,5 +160,4 @@ GAME_UPDATE_AND_RENDER(game_update_and_render_stub) {}
 typedef GAME_GET_SOUND_SAMPLES(PtrGameGetSoundSamples);
 GAME_GET_SOUND_SAMPLES(game_get_sound_samples_stub) {}
 
-#define HANDMADE_H
 #endif

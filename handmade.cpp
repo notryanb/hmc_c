@@ -1,12 +1,11 @@
 #include "handmade.h"
 
-static void 
-render_weird_gradient(GameOffScreenBuffer *buffer, int x_offset, int y_offset) {
+static void  render_weird_gradient(GameOffScreenBuffer *buffer, int x_offset, int y_offset) {
 	// ensure void* is cast to unsigned 8-bit int so we can do pointer arithmetic
-	uint8 *row = (uint8 *)buffer->memory;
+	u8 *row = (u8 *)buffer->memory;
 
 	for(int y = 0; y < buffer->height; ++y) {
-    uint32 *pixel = (uint32 *)row;
+    u32 *pixel = (u32 *)row;
 
 		for(int x = 0; x < buffer->width; ++x) {
 			/* 
@@ -15,8 +14,8 @@ render_weird_gradient(GameOffScreenBuffer *buffer, int x_offset, int y_offset) {
 			 * Bytes: 00 00 00 00
 			 * Repr:  xx RR GG BB
 			 */
-			uint8 blue = (x + x_offset);
-			uint8 green = (y + y_offset); 
+			u8 blue = (x + x_offset);
+			u8 green = (y + y_offset); 
 			*pixel++ = ((green << 8) | blue);
 		}
 
@@ -25,20 +24,19 @@ render_weird_gradient(GameOffScreenBuffer *buffer, int x_offset, int y_offset) {
 }
 
 // The sound_buffer is interleaved LRLRLR...
-static void 
-output_sound(GameState *game_state, GameSoundOutputBuffer *sound_buffer, int toneHz) {
-    int16_t tone_volume = 2500;
+static void output_sound(GameState *game_state, GameSoundOutputBuffer *sound_buffer, int toneHz) {
+    i16 tone_volume = 2500;
     int wave_period = sound_buffer->samples_per_second / toneHz;
 
-		int16_t *sample_out = sound_buffer->samples;
+		i16 *sample_out = sound_buffer->samples;
 
 		for(int sample_index = 0; sample_index < sound_buffer->sample_count; ++sample_index) {
-			float sine_value = sinf(game_state->sine);
-			int16_t sample_value = (int16)(sine_value * tone_volume);
+			f32 sine_value = sinf(game_state->sine);
+			i16 sample_value = (i16)(sine_value * tone_volume);
 			*sample_out++ = sample_value;
 			*sample_out++ = sample_value;
 
-      game_state->sine += 2.0f * Pi32 * (1.0f / (float)wave_period);
+      game_state->sine += 2.0f * Pi32 * (1.0f / (f32)wave_period);
       if (game_state->sine > 2.0f * Pi32) {
         game_state->sine -= 2.0f * Pi32;
       }
@@ -46,21 +44,20 @@ output_sound(GameState *game_state, GameSoundOutputBuffer *sound_buffer, int ton
 }
 
 // Renders a small square as the player
-static void
-render_player(GameOffScreenBuffer *buffer, int player_x, int player_y) {
-  uint8_t *end_of_buffer = (uint8_t *)buffer->memory + buffer->pitch * buffer->height;
-  uint32_t color = 0xFFFFFFFF;
+static void render_player(GameOffScreenBuffer *buffer, int player_x, int player_y) {
+  u8 *end_of_buffer = (u8 *)buffer->memory + buffer->pitch * buffer->height;
+  u32 color = 0xFFFFFFFF;
   int top = player_y;
   int bottom = player_y + 10;
 
   for(int x = player_x; x < player_x + 10; ++x) {
-    uint8_t *pixel =  (uint8_t *)buffer->memory + 
+    u8 *pixel =  (u8 *)buffer->memory + 
         (x * buffer->bytes_per_pixel) + 
         (top * buffer->pitch);
 
     for(int y = top; y < bottom; ++y) {
       if ((pixel >= buffer->memory) && ((pixel + 4) <= end_of_buffer)) {
-        *(uint32_t *)pixel = color; 
+        *(u32 *)pixel = color; 
       }
 
       pixel += buffer->pitch;

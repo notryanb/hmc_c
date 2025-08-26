@@ -1,4 +1,3 @@
-
 #if !defined(WIN32_HANDMADE_H)
 
 // Holds function pointers imported for live-loading game code.
@@ -35,7 +34,7 @@ struct Win32SoundOutput {
 	int samples_per_second;
 	int bytes_per_sample;
   int latency_sample_count;
-	uint32_t running_sample_index;
+	u32 running_sample_index;
 };
 
 
@@ -55,7 +54,7 @@ struct Win32WindowDimension {
 
 struct Win32State {
   // indicates the size of the game memory chunk
-  uint64_t game_memory_total_size;
+  u64 game_memory_total_size;
 
   // pointer to the game memory address
   void *game_memory;
