@@ -4,6 +4,10 @@
 /*
   Data Structures
 */
+struct DebugFileReadResult {
+  u32 contents_size;
+  void *contents;
+};
 
 // Holds function pointers imported for live-loading game code.
 struct Win32GameCode {

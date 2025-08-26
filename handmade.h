@@ -148,6 +148,12 @@ inline GameControllerInput *get_controller(GameInput *game_input, int controller
   return controller;
 }
 
+inline u32 u64_safe_truncate_to_u32(u64 value) {
+  Assert(value <= 0xFFFFFFFF);
+  u32 result = (u32)value;
+  return result;
+}
+
 #define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory,GameInput *input,GameOffScreenBuffer *buffer)
 typedef GAME_UPDATE_AND_RENDER(PtrGameUpdateAndRender);
 GAME_UPDATE_AND_RENDER(game_update_and_render_stub) {}

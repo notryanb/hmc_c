@@ -144,48 +144,43 @@ static DebugFileReadResult debug_platform_read_entire_file(char *file_name) {
     0
   );
 
-  if (file_handle != INVALID_HANDLE_VALUE) {
-    LARGE_INTEGER file_size;
-
-    if(GetFileSizeEx(file_handle, &file_size)) {
-      result.contents = VirtualAlloc(
-        0, 
-        file_size.QuadPart, 
-        MEM_RESERVE | MEM_COMMIT, 
-        PAGE_READWRITE
-      );
-
-      if (result.contents) {
-        DWORD bytes_read;
-
-        if (ReadFile(
-          file_handle,
-          result.contents,
-          file_size.QuadPart,
-          &bytes_read,
-          0
-        )) {
-          // TODO - implement success file read
-          result.contents_size = (u32)file_size.QuadPart;
-        }
-        else {
-          debug_platform_free_file_memory(result.contents);
-          result.contents = 0;
-        }
-      }
-      else {
-        // TODO - log error
-      }
-    }
-    else {
-      // TODO - log error
-    }
-
-    CloseHandle(file_handle);
+  if (file_handle == INVALID_HANDLE_VALUE) {
+    // TODO - Log error
+    return result;
   }
-  else {
-    // TODO - log error
+
+  LARGE_INTEGER file_size;
+
+  if(!GetFileSizeEx(file_handle, &file_size)) {
+    // TODO - Log error
+    return result;
   }
+
+  u32 file_size_32 = u64_safe_truncate_to_u32(file_size.QuadPart);
+  result.contents = VirtualAlloc(
+    0, 
+    file_size_32, 
+    MEM_RESERVE | MEM_COMMIT, 
+    PAGE_READWRITE
+  );
+
+  if (!result.contents) {
+    // TODO - Log error
+    return result;
+  }
+
+  DWORD bytes_read;
+
+  // ReadFile's 3rd arg is a u32. If the QuadPart is > 4GB, then it'll fail, but this is unlikely
+  if (ReadFile(file_handle, result.contents, file_size_32, &bytes_read, 0)) {
+    // TODO - implement success file read
+    result.contents_size = (u32)file_size.QuadPart;
+  } else {
+    debug_platform_free_file_memory(result.contents);
+    result.contents = 0;
+  }
+
+  CloseHandle(file_handle);
 
   return(result);
 }
