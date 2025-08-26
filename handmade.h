@@ -32,9 +32,9 @@ struct DebugFileReadResult {
   void *contents;
 };
 
-DebugFileReadResult debug_platform_read_entire_file(char *file_name);
-void debug_platform_free_file_memory(void *memory);
-bool debug_platform_write_entire_file(char *file_name, uint32_t memory_size, void *memory);
+static DebugFileReadResult debug_platform_read_entire_file(char *file_name);
+static void debug_platform_free_file_memory(void *memory);
+static bool debug_platform_write_entire_file(char *file_name, uint32_t memory_size, void *memory);
 
 // Data Structures
 struct GameOffScreenBuffer {
@@ -52,7 +52,11 @@ struct GameSoundOutputBuffer {
 };
 
 struct GameButtonState {
+  // Indicates how many times a button transistioned from on->off or off->on
   int half_transition_count;
+
+  // Indicates if the button's last state is down. This initial state can be calculated
+  // from this information with the half_transition_count
   bool ended_down;
 };
 
@@ -99,11 +103,11 @@ struct GameState {
 };
 
 struct GameMemory {
-  bool is_initialized;
   uint64_t permanent_storage_size;
-  void *permanent_storage;
   uint64_t transient_storage_size;
+  void *permanent_storage;
   void *transient_storage;
+  bool is_initialized;
 };
 
 // Fuctions

@@ -24,9 +24,10 @@ render_weird_gradient(GameOffScreenBuffer *buffer, int x_offset, int y_offset) {
 	}
 }
 
+// The sound_buffer is interleaved LRLRLR...
 static void 
 output_sound(GameState *game_state, GameSoundOutputBuffer *sound_buffer, int toneHz) {
-    int16_t tone_volume = 3000;
+    int16_t tone_volume = 2500;
     int wave_period = sound_buffer->samples_per_second / toneHz;
 
 		int16_t *sample_out = sound_buffer->samples;
@@ -47,11 +48,7 @@ output_sound(GameState *game_state, GameSoundOutputBuffer *sound_buffer, int ton
 // Renders a small square as the player
 static void
 render_player(GameOffScreenBuffer *buffer, int player_x, int player_y) {
-  uint8_t *end_of_buffer = (uint8_t *)buffer->memory + 
-    buffer->pitch * 
-    buffer->height;
-
-
+  uint8_t *end_of_buffer = (uint8_t *)buffer->memory + buffer->pitch * buffer->height;
   uint32_t color = 0xFFFFFFFF;
   int top = player_y;
   int bottom = player_y + 10;
@@ -92,7 +89,6 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render)
     }
     */
 
-
     game_state->blue_offset = 0;
     game_state->green_offset = 0;
     game_state->tone_hz = 256;
@@ -104,7 +100,7 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render)
     memory->is_initialized = true;
   }
 
-  for(int controller_idx = 0;
+  for (int controller_idx = 0;
       controller_idx < ArrayCount(input->controllers);
       ++controller_idx) 
   {

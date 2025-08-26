@@ -30,12 +30,12 @@ struct Win32DebugSoundCursor {
 };
 
 struct Win32SoundOutput {
-	int samples_per_second;
-	uint32_t running_sample_index;
-	int bytes_per_sample;
 	DWORD secondary_buffer_size;
   DWORD safety_bytes;
+	int samples_per_second;
+	int bytes_per_sample;
   int latency_sample_count;
+	uint32_t running_sample_index;
 };
 
 
