@@ -56,14 +56,9 @@ typedef double f64;
 // #define Assert(Expression)
 // #endif
 
-
 /*
   Data Structures
 */
-struct DebugFileReadResult {
-  u32 contents_size;
-  void *contents;
-};
 
 struct GameOffScreenBuffer {
 	void *memory;
@@ -140,9 +135,10 @@ struct GameMemory {
 /*
   Functions
 */
-static DebugFileReadResult debug_platform_read_entire_file(char *file_name);
-static void debug_platform_free_file_memory(void *memory);
-static bool debug_platform_write_entire_file(char *file_name, u32 memory_size, void *memory);
+// TODO - Why do I have these in the handmade header?
+// static DebugFileReadResult debug_platform_read_entire_file(char *file_name);
+// static void debug_platform_free_file_memory(void *memory);
+// static bool debug_platform_write_entire_file(char *file_name, u32 memory_size, void *memory);
 
 // Gets the controller from the GameInput and asserts the controller index
 // is in bounds
