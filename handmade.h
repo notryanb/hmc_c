@@ -51,7 +51,13 @@ typedef double f64;
 
 // Assert macro for when compiling in "slow"
 // if HANDMADE_SLOW
-#define Assert(Expression) if(!(Expression)) {*(int *)0 = 0;}
+// #define Assert(Expression) if(!(Expression)) {*(int *)0 = 0;}
+
+// GCC Docs: This function causes the program to exit abnormally. GCC implements this function by using a target-dependent mechanism
+// (such as intentionally executing an illegal instruction) or by calling abort.
+// The mechanism used may vary from release to release so you should not rely on any particular implementation.
+#define Assert(Expression) if(!(Expression)) {__builtin_trap();}
+
 // #else
 // #define Assert(Expression)
 // #endif
@@ -143,7 +149,7 @@ struct GameMemory {
 // Gets the controller from the GameInput and asserts the controller index
 // is in bounds
 inline GameControllerInput *get_controller(GameInput *game_input, int controller_idx) {
-  // Assert(controller_idx < ArrayCount(game_input->controllers));
+  Assert(controller_idx < ArrayCount(game_input->controllers));
   GameControllerInput *controller = &game_input->controllers[controller_idx];
   return controller;
 }

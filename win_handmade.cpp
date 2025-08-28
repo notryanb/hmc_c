@@ -172,7 +172,7 @@ static DebugFileReadResult debug_platform_read_entire_file(char *file_name) {
   DWORD bytes_read;
 
   // ReadFile's 3rd arg is a u32. If the QuadPart is > 4GB, then it'll fail, but this is unlikely
-  if (ReadFile(file_handle, result.contents, file_size_32, &bytes_read, 0)) {
+  if (ReadFile(file_handle, result.contents, file_size_32, &bytes_read, 0) && file_size_32 == bytes_read) {
     // TODO - implement success file read
     result.contents_size = (u32)file_size.QuadPart;
   } else {
@@ -449,6 +449,7 @@ static void Win32InitDirectSound(HWND window, i32 samples_per_second, i32 buffer
 		secondary_buffer_description.dwFlags = 0;
 		secondary_buffer_description.dwBufferBytes = buffer_size;
 		secondary_buffer_description.lpwfxFormat = &wave_format;
+
 		HRESULT secondary_buffer_result = direct_sound->CreateSoundBuffer(
 				&secondary_buffer_description,
 				&GlobalSecondarySoundBuffer,
@@ -690,7 +691,7 @@ static void win32_debug_draw_vertical(
     bottom = back_buffer->height;
   }
 
-  if (x >=0 && x < back_buffer->width) {
+  if (x >= 0 && x < back_buffer->width) {
     uint8_t *pixel =  (uint8_t *)back_buffer->memory + 
         (x * back_buffer->bytes_per_pixel) + 
         (top * back_buffer->pitch);
@@ -736,9 +737,7 @@ static void win32_debug_sync_display(
   // Maps sound buffer position to video pixels with some padding 
   f32 coefficient = (f32)(back_buffer->width - 2 * pad_x) / (f32)sound_output->secondary_buffer_size;
 
-  for(int sound_cursor_idx = 0;
-      sound_cursor_idx < sound_cursor_count;
-      ++sound_cursor_idx) 
+  for(int sound_cursor_idx = 0; sound_cursor_idx < sound_cursor_count; ++sound_cursor_idx) 
   {
     Win32DebugSoundCursor *current_sound_cursor = &debug_sound_cursors[sound_cursor_idx];
 
@@ -826,12 +825,16 @@ static void win32_debug_sync_display(
   }
 }
 
+// Map the thumbstick values [-1..1] and account for deadzone. Values inside the (SQUARE) deadzone
+// are not included in the map. Once outside the deadzone, the values will go -1..0 and 0..1.
+// Otherwise including the deadzone in the map would mean values would start at 0 and then jump
+// to something like 0.2 once the deadzone is exited.
 static f32 win32_process_input_stick_value(SHORT thumbstick, f32 deadzone_threshold) {
   f32 result = 0;
   if(thumbstick < -deadzone_threshold) {
-    result = (f32)thumbstick / 32768.0f;
+    result = (f32)((f32)thumbstick + deadzone_threshold) / (32768.0f - deadzone_threshold);
   } else if (thumbstick > deadzone_threshold) {
-    result = (f32)thumbstick / 32767.0f;
+    result = (f32)((f32)thumbstick + deadzone_threshold) / (32767.0f - deadzone_threshold);
   }
 
   return result;
@@ -923,9 +926,9 @@ int CALLBACK WinMain(
 	WindowClass.hInstance = Instance;
 	WindowClass.lpszClassName = "HandmadeHeroWindowClass";
 
+// These have to be defines because it is eventually used in sizing an array
 #define monitor_refresh_rate 60
 #define game_update_hz (monitor_refresh_rate / 2)
-
   f32 target_seconds_per_frame = 1.0f / (f32)game_update_hz;
 
 	/* takes pointer to WindowClass */
@@ -1031,7 +1034,7 @@ int CALLBACK WinMain(
       // Performance counting
       LARGE_INTEGER last_counter = win32_get_wall_clock();
 			u64 last_cycle_count = __rdtsc();
-      LARGE_INTEGER flip_wall_clock = win32_get_wall_clock();
+      LARGE_INTEGER frame_wall_clock = win32_get_wall_clock();
 
 			while(Running) {
 
@@ -1045,8 +1048,8 @@ int CALLBACK WinMain(
           );
         }
 
-        GameControllerInput *old_keyboard_controller = &old_input->controllers[0];
-        GameControllerInput *new_keyboard_controller = &new_input->controllers[0];
+        GameControllerInput *old_keyboard_controller = get_controller(old_input, 0);
+        GameControllerInput *new_keyboard_controller = get_controller(new_input, 0);
         GameControllerInput zeroed_controller = {};
         *new_keyboard_controller = zeroed_controller;
         new_keyboard_controller->is_connected = true;
@@ -1068,9 +1071,10 @@ int CALLBACK WinMain(
 
 				for(DWORD controller_idx = 0; controller_idx < max_controller_count; ++controller_idx) 
 				{
+				  // keyboard is controller_idx 0, so add 1 for processing all other inputs
           DWORD our_controller_idx = controller_idx + 1;
-          GameControllerInput *old_controller = &old_input->controllers[our_controller_idx];
-          GameControllerInput *new_controller = &new_input->controllers[our_controller_idx];
+          GameControllerInput *old_controller = get_controller(old_input, our_controller_idx);
+          GameControllerInput *new_controller = get_controller(new_input, our_controller_idx);
 
 
 					XINPUT_STATE controller_state;
@@ -1092,18 +1096,26 @@ int CALLBACK WinMain(
               XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE
             );
 
+            if ((new_controller->avg_stick_x != 0.0f) || (new_controller->avg_stick_y != 0.0f)) {
+              new_controller->is_analog = true;
+            }
+
 
             if(gamepad->wButtons & XINPUT_GAMEPAD_DPAD_UP) {
               new_controller->avg_stick_y = 1.0f;
+              new_controller->is_analog = false;
             }
             if(gamepad->wButtons & XINPUT_GAMEPAD_DPAD_DOWN) {
               new_controller->avg_stick_y = -1.0f;
+              new_controller->is_analog = false;
             }
             if(gamepad->wButtons & XINPUT_GAMEPAD_DPAD_LEFT) {
               new_controller->avg_stick_x = -1.0f;
+              new_controller->is_analog = false;
             }
             if(gamepad->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) {
               new_controller->avg_stick_x = 1.0f;
+              new_controller->is_analog = false;
             }
 
             f32 threshold = 0.5f;
@@ -1228,15 +1240,50 @@ int CALLBACK WinMain(
 				game_code.update_and_render(&game_memory, new_input, &game_offscreen_buffer);
 
        
+        /*
+            Audio latency
+            ---------------
+            Low Latency Audio =)
+              The write cursor falls within the leftover frame time.
+              Move audio write up to the frame boundary and write one frame's worth of audio.
+              We will have to check how much the write cursor has moved every frame
+              Basically always writing one frame or average WC amount
 
-        // Start setting up sound buffer
-        // Compensate for sound cards with different latencies.
-        // Look at how far away the write cursor is away from the play cursor
-        // as well as where in the frame the cursors are. Decide to write
-        // to the next frame boundary or further ahead with some safety margin
-        // past the next frame boundary.
+              Round up to frame boundary from where write cursor is projected.
+              Find where write cursor is. If it is inside the frame boundary - there is time left before the frame ends.
+              Project the write cursor forward with wc + samples per frame.
+              The target is the next expected frame boundary.
+
+
+              ___CURRENT FRAME____|
+                              ~~~~~~~~WRITE AUDIO~~~~~~|
+                                   __FOLLOWING FRAME___|
+                                                 ~~~~~~~~~WRITE NEXT AUDIO~~|
+                                                 |-OVW-| (overwrite - Play cursor hasn't gotten here yet)
+
+              |-------P------W----|------P2------W2----|--------------------|---->
+              
+              
+
+            High Latency Audio =(
+              The write cursor will fall in the following frame which we aren't yet computing.
+              We will write up to the next frame and then also to where we EXPECT the next WC to be.
+              Add some safety margin past that because the next WC may be a little earlier or a little later.
+              WC + frame samples + safety margin (probably a few samples 1-2ms)
+
+              ___CURRENT FRAME____|
+                                    ~~~~~~~~~~~~~~~~~~~|~~~SM~~~| (write up to the next frame plus some safety margin incase the next WC doesn't fall exactly where we expect)
+
+                                   __FOLLOWING FRAME___|
+                                                          |~~OVW~~~~~~~~~~~~|~~~SM~~~|
+
+              |-------P-----------|--W---P2------------|--W2----------------|---------------->
+
+            
+        */
         LARGE_INTEGER audio_wall_clock = win32_get_wall_clock();
-        f32 frame_begin_audio_seconds_delta = win32_get_seconds_elapsed(flip_wall_clock, audio_wall_clock);
+        f32 frame_begin_audio_seconds_delta = win32_get_seconds_elapsed(frame_wall_clock, audio_wall_clock);
+
         DWORD play_cursor;
         DWORD write_cursor;
         HRESULT sound_buffer_position_result = GlobalSecondarySoundBuffer->GetCurrentPosition(
@@ -1260,6 +1307,16 @@ int CALLBACK WinMain(
           f32 seconds_left_until_flip = target_seconds_per_frame - frame_begin_audio_seconds_delta;
           f32 audio_frame_ratio = seconds_left_until_flip / target_seconds_per_frame;
 
+          // Add buffer size when write cursor wraps around and is behind the play cursor
+          DWORD unwrapped_write_cursor = write_cursor;
+          if (unwrapped_write_cursor < play_cursor) {
+            unwrapped_write_cursor += sound_output.secondary_buffer_size;
+          }
+
+          audio_latency_bytes = unwrapped_write_cursor - play_cursor;
+          f32 samples_between_cursors = (f32)audio_latency_bytes / (f32)sound_output.bytes_per_sample;
+          audio_latency_seconds = samples_between_cursors / (f32)sound_output.samples_per_second;
+
           // TODO!!!!!
           // This expected_bytes_until_flip calculation is blowing up when declared as a DWORD and the screen is resizing.
           // Need to investigate this bug and better understand the sound code.
@@ -1279,7 +1336,7 @@ int CALLBACK WinMain(
           DWORD expected_bytes_until_flip = 0;
 
           DWORD expected_frame_boundary_byte = play_cursor + expected_sound_bytes_per_frame;
-          DWORD safe_write_cursor = write_cursor + sound_output.safety_bytes;
+          DWORD safe_write_cursor = unwrapped_write_cursor + sound_output.safety_bytes;
           bool audio_card_is_latent = safe_write_cursor >= expected_frame_boundary_byte;
           DWORD target_cursor = 0;
 
@@ -1315,15 +1372,15 @@ int CALLBACK WinMain(
           sound_cursor->output_byte_count = bytes_to_write;
           sound_cursor->expected_flip_play_cursor = expected_frame_boundary_byte;
 
-          DWORD unwrapped_write_cursor = write_cursor;
+          // DWORD unwrapped_write_cursor = write_cursor;
 
-          // Add buffer size when write cursor wraps around and is behind the play cursor
-          if (unwrapped_write_cursor < play_cursor) {
-            unwrapped_write_cursor += sound_output.secondary_buffer_size;
-          }
-          audio_latency_bytes = unwrapped_write_cursor - play_cursor;
-          f32 samples_between_cursors = (f32)audio_latency_bytes / (f32)sound_output.bytes_per_sample;
-          audio_latency_seconds = samples_between_cursors / (f32)sound_output.samples_per_second;
+          // // Add buffer size when write cursor wraps around and is behind the play cursor
+          // if (unwrapped_write_cursor < play_cursor) {
+          //   unwrapped_write_cursor += sound_output.secondary_buffer_size;
+          // }
+          // audio_latency_bytes = unwrapped_write_cursor - play_cursor;
+          // f32 samples_between_cursors = (f32)audio_latency_bytes / (f32)sound_output.bytes_per_sample;
+          // audio_latency_seconds = samples_between_cursors / (f32)sound_output.samples_per_second;
           // End Debug Sound Stuff
 
           Win32FillSoundBuffer(&sound_output, byte_to_lock, bytes_to_write, &sound_buffer);
@@ -1332,7 +1389,12 @@ int CALLBACK WinMain(
         }
 
 
-        // compute target FPS
+        /*
+          WAIT TIME
+          --------
+          This is the leftover time until the frame ends.
+          Sleep if we can so we don't burn processor time.
+        */
         LARGE_INTEGER work_counter = win32_get_wall_clock();
         f32 seconds_elapsed_for_work = win32_get_seconds_elapsed(last_counter, work_counter);
         f32 seconds_elapsed_for_frame = seconds_elapsed_for_work;
@@ -1340,10 +1402,10 @@ int CALLBACK WinMain(
         if (seconds_elapsed_for_frame < target_seconds_per_frame) {
           while (seconds_elapsed_for_frame < target_seconds_per_frame) {
             if (sleep_is_granular) {
-              DWORD sleep_ms = (DWORD)(1000.0f * 
-                (target_seconds_per_frame - seconds_elapsed_for_frame));
+              DWORD sleep_ms = (DWORD)(1000.0f * (target_seconds_per_frame - seconds_elapsed_for_frame));
 
               if (sleep_ms > 0) {
+                // Avoid burning cycles in a spin cycle
                 Sleep(sleep_ms);
               }
             }
@@ -1352,8 +1414,10 @@ int CALLBACK WinMain(
             }
           }
         } else {
-          // TODO: Missed frame rate, need to log
+          // TODO: Missed frame rate, need to LOG
         }
+
+        
         
 				// Close time window
         LARGE_INTEGER end_counter = win32_get_wall_clock();
@@ -1379,14 +1443,14 @@ int CALLBACK WinMain(
 					dimension.height
 				);
         
-        flip_wall_clock = win32_get_wall_clock();
+        // This marks the end of the frame
+        frame_wall_clock = win32_get_wall_clock();
 
         //For debugging sound cursors
         sound_buffer_position_result = GlobalSecondarySoundBuffer->GetCurrentPosition(
           &play_cursor,
           &write_cursor
         );
-        
 
         if (SUCCEEDED(sound_buffer_position_result)) {
           if (!sound_is_valid) {
@@ -1398,10 +1462,8 @@ int CALLBACK WinMain(
         }
 
         Win32DebugSoundCursor *debug_sound_cursor = &debug_sound_cursors[debug_sound_cursor_idx];
-
         debug_sound_cursor->flip_play_cursor = play_cursor;
         debug_sound_cursor->flip_write_cursor = write_cursor;
-
         // End debugging sound cursors
 
         GameInput *temp = new_input;
@@ -1443,6 +1505,6 @@ int CALLBACK WinMain(
 		// TODO: Handle Failure of window creation
 	}
 	
-	return(0);
+	return 0;
 }
 

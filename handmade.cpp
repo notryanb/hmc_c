@@ -101,7 +101,7 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render)
       controller_idx < ArrayCount(input->controllers);
       ++controller_idx) 
   {
-    GameControllerInput *controller = &input->controllers[controller_idx];
+    GameControllerInput *controller = get_controller(input, controller_idx);
     
     if(controller->is_analog) {
       // TODO: Analog movement tuning
