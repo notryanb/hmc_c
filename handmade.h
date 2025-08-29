@@ -3,6 +3,7 @@
 
 #include <math.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 /*
   Constants / typedefs
@@ -29,9 +30,6 @@ typedef int64_t i64;
 
 typedef float f32;
 typedef double f64;
-
-//#include "handmade.h"
-//#include "handmade.cpp"
 
 /*
   HANDMADE_INTERNAL:
@@ -129,13 +127,47 @@ struct GameState {
   f32 jump_timer;
 };
 
+/* Debug Specific */
+struct DebugFileReadResult {
+  u32 contents_size;
+  void *contents;
+};
+
+// How this works...
+// 1 - Define the macro and what it expands to.
+//     the (name) portion allows you to put a custom name that will expand when it is used in the definition.
+//     The definition here is just a function signature where the name of the function is whatever you put into the macro.
+// 2 - the typedef actually invokes the macro. This means it'll expand the macro into code at compile time with whatever you defined.
+//     In this case, it takes 'debug_platform_free_file_memory' and then turns it into...
+//     'void debug_platform_free_file_memory(void *memory)' to be used as a function declaration.
+// 3 - Any code using this header can use that typedef'd function signature to implement the function .
+#define DEBUG_PLATFORM_FREE_FILE_MEMORY(name) void name(void *memory)
+typedef DEBUG_PLATFORM_FREE_FILE_MEMORY(debug_platform_free_file_memory);
+
+#define DEBUG_PLATFORM_READ_ENTIRE_FILE(name) DebugFileReadResult name(char *file_name)
+typedef DEBUG_PLATFORM_READ_ENTIRE_FILE(debug_platform_read_entire_file);
+
+#define DEBUG_PLATFORM_WRITE_ENTIRE_FILE(name) bool name(char *file_name, u32 memory_size, void *memory)
+typedef DEBUG_PLATFORM_WRITE_ENTIRE_FILE(debug_platform_write_entire_file);
+
 struct GameMemory {
   u64 permanent_storage_size;
   u64 transient_storage_size;
   void *permanent_storage;
   void *transient_storage;
+
+  // pointers to shared sebug file writing code.
+  // The type is the output of a macro which creates the function signatures
+  // The macros are used in platform code to define the functions and the function
+  // pointers are stored in the game memory so the same function can be used
+  // by both the game and the platform layer. Now the signature can be managed by the macros.
+  debug_platform_free_file_memory *dbg_platform_free_file_memory;
+  debug_platform_read_entire_file *dbg_platform_read_entire_file;
+  debug_platform_write_entire_file *dbg_platform_write_entire_file;
+
   bool is_initialized;
 };
+
 
 
 /*
@@ -160,11 +192,17 @@ inline u32 u64_safe_truncate_to_u32(u64 value) {
   return result;
 }
 
-#define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory,GameInput *input,GameOffScreenBuffer *buffer)
+/*
+  Function stubs
+*/
+
+
+
+#define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameInput *input,GameOffScreenBuffer *buffer)
 typedef GAME_UPDATE_AND_RENDER(PtrGameUpdateAndRender);
 GAME_UPDATE_AND_RENDER(game_update_and_render_stub) {}
 
-#define GAME_GET_SOUND_SAMPLES(name) void name(GameMemory *game_memory,GameSoundOutputBuffer *sound_buffer)
+#define GAME_GET_SOUND_SAMPLES(name) void name(GameMemory *game_memory, GameSoundOutputBuffer *sound_buffer)
 typedef GAME_GET_SOUND_SAMPLES(PtrGameGetSoundSamples);
 GAME_GET_SOUND_SAMPLES(game_get_sound_samples_stub) {}
 

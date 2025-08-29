@@ -131,7 +131,14 @@ static void win32_playback_input(Win32State *win32_state, GameInput *new_input) 
   };
 }
 
-static DebugFileReadResult debug_platform_read_entire_file(char *file_name) {
+
+DEBUG_PLATFORM_FREE_FILE_MEMORY(dbg_platform_free_file_memory) {
+  if(memory) {
+    VirtualFree(memory, 0, MEM_RELEASE);
+  }
+}
+
+DEBUG_PLATFORM_READ_ENTIRE_FILE(dbg_platform_read_entire_file) {
   DebugFileReadResult result = {};
 
   HANDLE file_handle = CreateFileA(
@@ -176,7 +183,7 @@ static DebugFileReadResult debug_platform_read_entire_file(char *file_name) {
     // TODO - implement success file read
     result.contents_size = (u32)file_size.QuadPart;
   } else {
-    debug_platform_free_file_memory(result.contents);
+    dbg_platform_free_file_memory(result.contents);
     result.contents = 0;
   }
 
@@ -185,13 +192,8 @@ static DebugFileReadResult debug_platform_read_entire_file(char *file_name) {
   return(result);
 }
 
-static void debug_platform_free_file_memory(void *memory) {
-  if(memory) {
-    VirtualFree(memory, 0, MEM_RELEASE);
-  }
-}
 
-static bool debug_platform_write_entire_file(char *file_name, u32 memory_size, void *memory) {
+DEBUG_PLATFORM_WRITE_ENTIRE_FILE(dbg_platform_write_entire_file) {
   bool result = false;
 
   HANDLE file_handle = CreateFileA(
@@ -270,8 +272,7 @@ static Win32GameCode win32_load_game_code(char *source_dll_name, char *temp_dll_
 }
 
 // Unloads the live-loaded game code dll
-static void
-win32_unload_game_code(Win32GameCode *game_code) {
+static void win32_unload_game_code(Win32GameCode *game_code) {
   if (game_code->dll) {
     FreeLibrary(game_code->dll);
     game_code->dll = 0;
@@ -1006,6 +1007,10 @@ int CALLBACK WinMain(
       GameMemory game_memory = {};
       game_memory.permanent_storage_size = 64 * 1024 * 1024; // 64MB
       game_memory.transient_storage_size = (u64)4 * 1024 * 1024 * 1024; // 4GB
+      game_memory.dbg_platform_free_file_memory = dbg_platform_free_file_memory;
+      game_memory.dbg_platform_read_entire_file = dbg_platform_read_entire_file;
+      game_memory.dbg_platform_write_entire_file = dbg_platform_write_entire_file;
+      
       win32_state.game_memory_total_size = game_memory.permanent_storage_size + game_memory.transient_storage_size;
 
       win32_state.game_memory = VirtualAlloc(

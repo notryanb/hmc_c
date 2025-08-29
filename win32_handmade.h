@@ -4,10 +4,10 @@
 /*
   Data Structures
 */
-struct DebugFileReadResult {
-  u32 contents_size;
-  void *contents;
-};
+// struct DebugFileReadResult {
+//   u32 contents_size;
+//   void *contents;
+// };
 
 // Holds function pointers imported for live-loading game code.
 struct Win32GameCode {
@@ -86,9 +86,9 @@ struct Win32State {
 /*
    Functions
 */
-static DebugFileReadResult debug_platform_read_entire_file(char *file_name);
-static void debug_platform_free_file_memory(void *memory);
-static bool debug_platform_write_entire_file(char *file_name, u32 memory_size, void *memory);
+// static DebugFileReadResult debug_platform_read_entire_file(char *file_name);
+// static void debug_platform_free_file_memory(void *memory);
+// static bool debug_platform_write_entire_file(char *file_name, u32 memory_size, void *memory);
 
 
 #endif

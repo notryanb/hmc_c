@@ -71,20 +71,19 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render)
   GameState *game_state = (GameState *)memory->permanent_storage;
 
   if (!memory->is_initialized) {
-    /* Debug file reading/writing
+    // Debug file reading/writing
     char *file_name = "D:/Programming/handmade_hero/README.md";
-    DebugFileReadResult file_result = debug_platform_read_entire_file(file_name);
+    DebugFileReadResult file_result = memory->dbg_platform_read_entire_file(file_name);
 
     if (file_result.contents) {
-      debug_platform_write_entire_file(
+      memory->dbg_platform_write_entire_file(
           "D:/Programming/handmade_hero/test.out", 
           file_result.contents_size,
           file_result.contents
       );
-
-      debug_platform_free_file_memory(file_result.contents);
+      
+      memory->dbg_platform_free_file_memory(file_result.contents);
     }
-    */
 
     game_state->blue_offset = 0;
     game_state->green_offset = 0;
@@ -129,7 +128,7 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render)
     if(controller->action_down.ended_down) {
       //game_state->green_offset += 1;
       game_state->jump_timer = 1.0;
-      game_state->player_y -= 10;
+      game_state->player_y -= 3;
     }
     game_state->jump_timer -= 0.033f;
   }
