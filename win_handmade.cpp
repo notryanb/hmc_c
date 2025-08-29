@@ -741,14 +741,24 @@ static void win32_debug_sync_display(
   {
     Win32DebugSoundCursor *current_sound_cursor = &debug_sound_cursors[sound_cursor_idx];
 
+    Assert(current_sound_cursor->output_play_cursor < sound_output->secondary_buffer_size);
+    Assert(current_sound_cursor->output_write_cursor< sound_output->secondary_buffer_size);
+    Assert(current_sound_cursor->output_location < sound_output->secondary_buffer_size);
+    Assert(current_sound_cursor->output_byte_count < sound_output->secondary_buffer_size);
+    Assert(current_sound_cursor->flip_play_cursor < sound_output->secondary_buffer_size);
+    Assert(current_sound_cursor->flip_write_cursor < sound_output->secondary_buffer_size);
+
     DWORD play_color = 0xFFFFFFFF;
     DWORD write_color = 0xFFFF0000;
+    DWORD expected_frame_clip_color = 0xFFFFFF00;
 
     int top = pad_y;
     int bottom = pad_y + line_height;
+    
     if (sound_cursor_idx == current_cursor_index) {
       top += pad_y + line_height;
       bottom += pad_y + line_height;
+      int first_top = top;
 
       win32_draw_sound_buffer_line(
           back_buffer, 
@@ -799,6 +809,17 @@ static void win32_debug_sync_display(
       
       top += pad_y + line_height;
       bottom += pad_y + line_height;
+
+      win32_draw_sound_buffer_line(
+          back_buffer, 
+          sound_output, 
+          coefficient, 
+          pad_x, 
+          first_top, 
+          bottom, 
+          current_sound_cursor->expected_flip_play_cursor,
+          expected_frame_clip_color
+      );
     }
        
     win32_draw_sound_buffer_line(
@@ -1282,7 +1303,7 @@ int CALLBACK WinMain(
             
         */
         LARGE_INTEGER audio_wall_clock = win32_get_wall_clock();
-        f32 frame_begin_audio_seconds_delta = win32_get_seconds_elapsed(frame_wall_clock, audio_wall_clock);
+        f32 frame_begin_to_audio_seconds_delta = win32_get_seconds_elapsed(frame_wall_clock, audio_wall_clock);
 
         DWORD play_cursor;
         DWORD write_cursor;
@@ -1303,9 +1324,17 @@ int CALLBACK WinMain(
 
           DWORD expected_sound_bytes_per_frame = (sound_output.samples_per_second *
             sound_output.bytes_per_sample) / game_update_hz;
-          
-          f32 seconds_left_until_flip = target_seconds_per_frame - frame_begin_audio_seconds_delta;
-          f32 audio_frame_ratio = seconds_left_until_flip / target_seconds_per_frame;
+
+          f32 seconds_left_until_frame_end = target_seconds_per_frame - frame_begin_to_audio_seconds_delta;
+          if (seconds_left_until_frame_end < 0.0) {
+            // DWORD is a u32. When the window is clicked and dragged, this is causing the seconds_left_until_frame_end
+            // to go negative. After the computation is complete, the cast to DWORD is an invalid operation.
+            // clamp to 0.0 for now....
+            seconds_left_until_frame_end = 0.0;
+          }
+
+          DWORD expected_bytes_until_frame_end =
+            (DWORD)((seconds_left_until_frame_end / target_seconds_per_frame) * (f32)expected_sound_bytes_per_frame);
 
           // Add buffer size when write cursor wraps around and is behind the play cursor
           DWORD unwrapped_write_cursor = write_cursor;
