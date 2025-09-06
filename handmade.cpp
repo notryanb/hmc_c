@@ -137,6 +137,15 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render)
 
 	render_weird_gradient(buffer, game_state->blue_offset, game_state->green_offset);
   render_player(buffer, game_state->player_x, game_state->player_y);
+
+  /* Mouse debug */
+  render_player(buffer, input->mouse_x, input->mouse_y);
+
+  for(int btn_idx = 0; btn_idx < ArrayCount(input->mouse_buttons); ++btn_idx) {
+    if (input->mouse_buttons[btn_idx].ended_down) {
+      render_player(buffer, 10 + 20 * btn_idx, 10);
+    }
+  }
 };
 
 

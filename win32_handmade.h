@@ -4,10 +4,6 @@
 /*
   Data Structures
 */
-// struct DebugFileReadResult {
-//   u32 contents_size;
-//   void *contents;
-// };
 
 // Holds function pointers imported for live-loading game code.
 struct Win32GameCode {
@@ -61,12 +57,24 @@ struct Win32WindowDimension {
 	int height;
 };
 
+// TODO - MAX_PATH is dangerous and shouldn't be used in production code.
+#define WIN32_STATE_FILE_NAME_COUNT MAX_PATH
+
+struct Win32ReplayBuffer {
+  HANDLE file_handle;
+  HANDLE memory_map;
+  char file_name[WIN32_STATE_FILE_NAME_COUNT];
+  void *memory_block;
+};
+
 struct Win32State {
   // indicates the size of the game memory chunk
   u64 game_memory_total_size;
 
   // pointer to the game memory address
   void *game_memory;
+
+  Win32ReplayBuffer replay_buffers[4];
 
   // File handle to where the state gets persisted
   HANDLE recording_handle;
@@ -79,16 +87,9 @@ struct Win32State {
 
   // Indicates position into the playback state
   int input_playback_index;
+
+  char exe_file_name[WIN32_STATE_FILE_NAME_COUNT];
+  char *exe_file_name_one_past_last_slash;
 };
-
-
-
-/*
-   Functions
-*/
-// static DebugFileReadResult debug_platform_read_entire_file(char *file_name);
-// static void debug_platform_free_file_memory(void *memory);
-// static bool debug_platform_write_entire_file(char *file_name, u32 memory_size, void *memory);
-
 
 #endif
