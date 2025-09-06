@@ -183,7 +183,7 @@ DEBUG_PLATFORM_READ_ENTIRE_FILE(dbg_platform_read_entire_file) {
     // TODO - implement success file read
     result.contents_size = (u32)file_size.QuadPart;
   } else {
-    dbg_platform_free_file_memory(result.contents);
+    dbg_platform_free_file_memory(thread_ctx, result.contents);
     result.contents = 0;
   }
 
@@ -898,6 +898,7 @@ int CALLBACK WinMain(
 	LPSTR lpCmdLine,
 	int nCmdShow
 ) {
+  // TODO - MAX_PATH is dangerous and shouldn't be used in production code.
   // Get path of where this executable is running
   char exe_file_name[MAX_PATH];
   DWORD size_of_filename = GetModuleFileNameA(0, exe_file_name, sizeof(exe_file_name));
@@ -940,6 +941,7 @@ int CALLBACK WinMain(
   bool sleep_is_granular = timeBeginPeriod(1) == TIMERR_NOERROR;
 
 	WNDCLASSA WindowClass = {};
+	ThreadContext thread_ctx = {};
 
 	Win32ResizeDIBSection(&GlobalBackBuffer, 1280, 720);
 
@@ -948,10 +950,6 @@ int CALLBACK WinMain(
 	WindowClass.hInstance = Instance;
 	WindowClass.lpszClassName = "HandmadeHeroWindowClass";
 
-// These have to be defines because it is eventually used in sizing an array
-#define monitor_refresh_rate 60
-#define game_update_hz (monitor_refresh_rate / 2)
-  f32 target_seconds_per_frame = 1.0f / (f32)game_update_hz;
 
 	/* takes pointer to WindowClass */
 	if (RegisterClass(&WindowClass)) {
@@ -971,15 +969,37 @@ int CALLBACK WinMain(
 		);
 
 		if (window) {
+		  HDC refresh_dc= GetDC(window);
+      int monitor_refresh_rate = 60;
+      int win32_refresh_rate = GetDeviceCaps(refresh_dc, VREFRESH);
+
+      if (win32_refresh_rate > 1) {
+        monitor_refresh_rate = win32_refresh_rate;
+      }
+
+    // These have to be defines because it is eventually used in sizing an array
+      f32 game_update_hz = (f32)(monitor_refresh_rate / 2.0f);
+      f32 target_seconds_per_frame = 1.0f / (f32)game_update_hz;
+
+      ReleaseDC(window, refresh_dc);
+
+			char refresh_rate_string_buffer[256];
+			_snprintf_s(
+				refresh_rate_string_buffer, 
+        sizeof(refresh_rate_string_buffer),
+				"%dhz is the monitor refresh rate\n", 
+				monitor_refresh_rate
+			);
+			OutputDebugStringA(refresh_rate_string_buffer);
+      
+
 		  HDC device_context = GetDC(window);
 
 			Win32SoundOutput sound_output = {};
 			sound_output.samples_per_second = 48000;
 			sound_output.running_sample_index = 0;
 			sound_output.bytes_per_sample = sizeof(i16) * 2; // Two channel audio
-      sound_output.safety_bytes = (sound_output.samples_per_second * 
-          sound_output.bytes_per_sample / 
-          game_update_hz / 4);
+      sound_output.safety_bytes = (int)(((f32)sound_output.samples_per_second * (f32)sound_output.bytes_per_sample / game_update_hz) / 1.0f);
 			sound_output.secondary_buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample;
       sound_output.latency_sample_count = sound_output.samples_per_second / game_update_hz;
 
@@ -1040,7 +1060,7 @@ int CALLBACK WinMain(
 
       // Initialize sound cursor tracking
       int debug_sound_cursor_idx = 0;
-      Win32DebugSoundCursor debug_sound_cursors[game_update_hz / 2] = {0};
+      Win32DebugSoundCursor debug_sound_cursors[30] = {0};
       DWORD audio_latency_bytes = 0;
       float audio_latency_seconds = 0.0f;
       bool sound_is_valid = false;
@@ -1263,7 +1283,7 @@ int CALLBACK WinMain(
           win32_playback_input(&win32_state, new_input);
         }
 
-				game_code.update_and_render(&game_memory, new_input, &game_offscreen_buffer);
+				game_code.update_and_render(&thread_ctx, &game_memory, new_input, &game_offscreen_buffer);
 
        
         /*
@@ -1327,8 +1347,8 @@ int CALLBACK WinMain(
 					DWORD byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % 
               sound_output.secondary_buffer_size;
 
-          DWORD expected_sound_bytes_per_frame = (sound_output.samples_per_second *
-            sound_output.bytes_per_sample) / game_update_hz;
+          DWORD expected_sound_bytes_per_frame = (DWORD)(((f32)sound_output.samples_per_second *
+            (f32)sound_output.bytes_per_sample) / game_update_hz);
 
           f32 seconds_left_until_frame_end = target_seconds_per_frame - frame_begin_to_audio_seconds_delta;
           if (seconds_left_until_frame_end < 0.0) {
@@ -1396,7 +1416,7 @@ int CALLBACK WinMain(
           sound_buffer.samples_per_second = sound_output.samples_per_second;
           sound_buffer.sample_count = bytes_to_write / sound_output.bytes_per_sample;
           sound_buffer.samples = samples;
-          game_code.get_sound_samples(&game_memory, &sound_buffer);
+          game_code.get_sound_samples(&thread_ctx, &game_memory, &sound_buffer);
 
           // Debug Sound stuff
           Win32DebugSoundCursor *sound_cursor = &debug_sound_cursors[debug_sound_cursor_idx];
@@ -1500,6 +1520,7 @@ int CALLBACK WinMain(
         debug_sound_cursor->flip_write_cursor = write_cursor;
         // End debugging sound cursors
 
+        // Swap game inputs
         GameInput *temp = new_input;
         new_input = old_input;
         old_input = temp;

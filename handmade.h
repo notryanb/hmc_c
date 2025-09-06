@@ -133,6 +133,14 @@ struct DebugFileReadResult {
   void *contents;
 };
 
+
+// Calling back into the platform layer will need this (free file memory, etc..)
+// Not every platform does a good job of returning what thread you're on.
+struct ThreadContext {
+  int placeholder;
+};
+
+
 // How this works...
 // 1 - Define the macro and what it expands to.
 //     the (name) portion allows you to put a custom name that will expand when it is used in the definition.
@@ -141,13 +149,13 @@ struct DebugFileReadResult {
 //     In this case, it takes 'debug_platform_free_file_memory' and then turns it into...
 //     'void debug_platform_free_file_memory(void *memory)' to be used as a function declaration.
 // 3 - Any code using this header can use that typedef'd function signature to implement the function .
-#define DEBUG_PLATFORM_FREE_FILE_MEMORY(name) void name(void *memory)
+#define DEBUG_PLATFORM_FREE_FILE_MEMORY(name) void name(ThreadContext *thread_ctx, void *memory)
 typedef DEBUG_PLATFORM_FREE_FILE_MEMORY(debug_platform_free_file_memory);
 
-#define DEBUG_PLATFORM_READ_ENTIRE_FILE(name) DebugFileReadResult name(char *file_name)
+#define DEBUG_PLATFORM_READ_ENTIRE_FILE(name) DebugFileReadResult name(ThreadContext *thread_ctx, const char *file_name)
 typedef DEBUG_PLATFORM_READ_ENTIRE_FILE(debug_platform_read_entire_file);
 
-#define DEBUG_PLATFORM_WRITE_ENTIRE_FILE(name) bool name(char *file_name, u32 memory_size, void *memory)
+#define DEBUG_PLATFORM_WRITE_ENTIRE_FILE(name) bool name(ThreadContext *thread_ctx, const char *file_name, u32 memory_size, void *memory)
 typedef DEBUG_PLATFORM_WRITE_ENTIRE_FILE(debug_platform_write_entire_file);
 
 struct GameMemory {
@@ -198,11 +206,11 @@ inline u32 u64_safe_truncate_to_u32(u64 value) {
 
 
 
-#define GAME_UPDATE_AND_RENDER(name) void name(GameMemory *memory, GameInput *input,GameOffScreenBuffer *buffer)
+#define GAME_UPDATE_AND_RENDER(name) void name(ThreadContext *thread_ctx, GameMemory *memory, GameInput *input,GameOffScreenBuffer *buffer)
 typedef GAME_UPDATE_AND_RENDER(PtrGameUpdateAndRender);
 GAME_UPDATE_AND_RENDER(game_update_and_render_stub) {}
 
-#define GAME_GET_SOUND_SAMPLES(name) void name(GameMemory *game_memory, GameSoundOutputBuffer *sound_buffer)
+#define GAME_GET_SOUND_SAMPLES(name) void name(ThreadContext *thread_ctx, GameMemory *game_memory, GameSoundOutputBuffer *sound_buffer)
 typedef GAME_GET_SOUND_SAMPLES(PtrGameGetSoundSamples);
 GAME_GET_SOUND_SAMPLES(game_get_sound_samples_stub) {}
 

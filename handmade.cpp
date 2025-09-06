@@ -24,7 +24,7 @@ static void  render_weird_gradient(GameOffScreenBuffer *buffer, int x_offset, in
 }
 
 // The sound_buffer is interleaved LRLRLR...
-static void output_sound(GameState *game_state, GameSoundOutputBuffer *sound_buffer, int toneHz) {
+static void output_sound(ThreadContext *thread_ctx, GameState *game_state, GameSoundOutputBuffer *sound_buffer, int toneHz) {
     i16 tone_volume = 2500;
     int wave_period = sound_buffer->samples_per_second / toneHz;
 
@@ -72,17 +72,19 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render)
 
   if (!memory->is_initialized) {
     // Debug file reading/writing
-    char *file_name = "D:/Programming/handmade_hero/README.md";
-    DebugFileReadResult file_result = memory->dbg_platform_read_entire_file(file_name);
+    const char *file_name = "D:/Programming/handmade_hero/README.md";
+    DebugFileReadResult file_result = memory->dbg_platform_read_entire_file(thread_ctx, file_name);
 
     if (file_result.contents) {
+      const char *output_file_name = "D:/Programming/handmade_hero/test.out";
       memory->dbg_platform_write_entire_file(
-          "D:/Programming/handmade_hero/test.out", 
+          thread_ctx,
+          output_file_name, 
           file_result.contents_size,
           file_result.contents
       );
       
-      memory->dbg_platform_free_file_memory(file_result.contents);
+      memory->dbg_platform_free_file_memory(thread_ctx, file_result.contents);
     }
 
     game_state->blue_offset = 0;
@@ -143,6 +145,6 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render)
 extern "C" __declspec(dllexport) GAME_GET_SOUND_SAMPLES(game_get_sound_samples)
 {
   GameState *game_state = (GameState *)game_memory->permanent_storage;
-  output_sound(game_state, sound_buffer, game_state->tone_hz);
+  output_sound(thread_ctx, game_state, sound_buffer, game_state->tone_hz);
 }
 
