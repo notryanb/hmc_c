@@ -113,6 +113,10 @@ struct GameControllerInput {
 };
 
 struct GameInput {
+  /* Mouse stuff for debugging */
+  GameButtonState mouse_buttons[5];
+  i32 mouse_x, mouse_y, mouse_z;
+
   GameControllerInput controllers[5];
 };
 
