@@ -117,18 +117,12 @@ struct GameInput {
   GameButtonState mouse_buttons[5];
   i32 mouse_x, mouse_y, mouse_z;
 
+  f32 target_seconds_per_frame;
+
   GameControllerInput controllers[5];
 };
 
 struct GameState {
-  int tone_hz;
-  int blue_offset;
-  int green_offset;
-  f32 sine;
-
-  int player_x;
-  int player_y;
-  f32 jump_timer;
 };
 
 /* Debug Specific */
