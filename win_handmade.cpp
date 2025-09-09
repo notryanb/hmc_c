@@ -956,7 +956,7 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR lpCmdLine
 	WNDCLASSA WindowClass = {};
 	ThreadContext thread_ctx = {};
 
-	Win32ResizeDIBSection(&GlobalBackBuffer, 1280, 720);
+	Win32ResizeDIBSection(&GlobalBackBuffer, 960, 540);
 
 	WindowClass.style = CS_CLASSDC | CS_HREDRAW | CS_VREDRAW;
 	WindowClass.lpfnWndProc = Win32MainWindowCallback;
@@ -1102,6 +1102,8 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR lpCmdLine
       LARGE_INTEGER frame_wall_clock = win32_get_wall_clock();
 
 			while(Running) {
+			  new_input->target_seconds_per_frame = target_seconds_per_frame;
+
 			  /* Mouse Debugging */
         POINT mouse_point;
         GetCursorPos(&mouse_point);
@@ -1512,21 +1514,22 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR lpCmdLine
         // Blit to screen after frame rate calculations
 				Win32WindowDimension dimension = GetWindowDimension(window);
 
-        win32_debug_sync_display(
-          &GlobalBackBuffer,
-          ArrayCount(debug_sound_cursors),
-          debug_sound_cursor_idx - 1, // TODO: This is wrong when the current index is 0
-          debug_sound_cursors,
-          &sound_output,
-          target_seconds_per_frame
-        );
+				/* Debug Sound Cursors */
+    //     win32_debug_sync_display(
+    //       &GlobalBackBuffer,
+    //       ArrayCount(debug_sound_cursors),
+    //       debug_sound_cursor_idx - 1, // TODO: This is wrong when the current index is 0
+    //       debug_sound_cursors,
+    //       &sound_output,
+    //       target_seconds_per_frame
+    //     );
 
-				Win32DisplayBufferInWindow(
-					&GlobalBackBuffer,
-					device_context, 
-					dimension.width,
-					dimension.height
-				);
+				// Win32DisplayBufferInWindow(
+				// 	&GlobalBackBuffer,
+				// 	device_context, 
+				// 	dimension.width,
+				// 	dimension.height
+				// );
         
         // This marks the end of the frame
         frame_wall_clock = win32_get_wall_clock();
