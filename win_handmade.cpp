@@ -549,9 +549,18 @@ static void Win32DisplayBufferInWindow(
 		int window_width,
 		int window_height
 ) {
+  int offset_x = 10;
+  int offset_y = 10;
+
+  PatBlt(device_context, 0, 0, window_width, offset_y, BLACKNESS);
+  PatBlt(device_context, 0, offset_y + buffer->height, window_width, window_height, BLACKNESS);
+  PatBlt(device_context, 0, 0, offset_x, window_height, BLACKNESS);
+  PatBlt(device_context, offset_x + buffer->width, 0, window_width, window_height, BLACKNESS);
+
+
 	StretchDIBits(
 		device_context,
-		0, 0, buffer->width, buffer->height,
+		offset_x, offset_y, buffer->width, buffer->height,
 		0, 0, buffer->width, buffer->height,
 		buffer->memory,
 		&buffer->info,
