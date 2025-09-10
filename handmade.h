@@ -1,7 +1,7 @@
 #if !defined(HANDMADE_H)
 #define HANDMADE_H
 
-#include <math.h>
+// #include <math.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -125,6 +125,25 @@ struct GameInput {
 struct GameState {
   f32 player_x;
   f32 player_y;
+};
+
+struct TileMap {
+  i32 count_x;
+  i32 count_y;
+  
+  f32 upper_left_x;
+  f32 upper_left_y;
+  f32 tile_width;
+  f32 tile_height;
+
+  u32 *tiles;
+};
+
+struct World {
+  i32 tile_map_count_x;
+  i32 tile_map_count_y;
+
+  TileMap *tile_maps;
 };
 
 /* Debug Specific */
