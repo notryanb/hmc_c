@@ -123,6 +123,8 @@ struct GameInput {
 };
 
 struct GameState {
+  f32 player_x;
+  f32 player_y;
 };
 
 /* Debug Specific */

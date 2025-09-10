@@ -1064,12 +1064,6 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR lpCmdLine
         replay_buffer->memory_block = MapViewOfFile(replay_buffer->memory_map, FILE_MAP_ALL_ACCESS,
                                                     0, 0, win32_state.game_memory_total_size);
 
-       //  replay_buffer->memory_block = VirtualAlloc(
-       //   0,
-       //   (size_t)win32_state.game_memory_total_size,
-       //   MEM_RESERVE | MEM_COMMIT,
-       //   PAGE_READWRITE
-       // );
 
         if (!(replay_buffer->memory_block)) {
           // TODO: Log Diagnostic error
@@ -1120,6 +1114,7 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR lpCmdLine
        FILETIME new_dll_write_time = win32_get_last_write_time(source_game_code_dll_full_path);
 
         if (CompareFileTime(&new_dll_write_time, &game_code.last_write_time) != 0) {
+          // TODO - Add Debug Logging
           win32_unload_game_code(&game_code);
           game_code = win32_load_game_code(
               source_game_code_dll_full_path,
@@ -1524,12 +1519,13 @@ int CALLBACK WinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPSTR lpCmdLine
     //       target_seconds_per_frame
     //     );
 
-				// Win32DisplayBufferInWindow(
-				// 	&GlobalBackBuffer,
-				// 	device_context, 
-				// 	dimension.width,
-				// 	dimension.height
-				// );
+        // Draw Call: Do not comment out.... hah
+				Win32DisplayBufferInWindow(
+					&GlobalBackBuffer,
+					device_context, 
+					dimension.width,
+					dimension.height
+				);
         
         // This marks the end of the frame
         frame_wall_clock = win32_get_wall_clock();

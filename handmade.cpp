@@ -42,7 +42,7 @@ static void draw_rectangle(
   GameOffScreenBuffer *buffer,
   f32 min_x, f32 min_y,
   f32 max_x, f32 max_y,
-  u32 color
+  f32 r, f32 g, f32 b
 ) {
   i32 x_min = f32_round_to_i32(min_x);
   i32 y_min = f32_round_to_i32(min_y);
@@ -55,7 +55,9 @@ static void draw_rectangle(
   if (y_max > buffer->height) { y_max = buffer->height; }
   
   u8 *end_of_buffer = (u8 *)buffer->memory + buffer->pitch * buffer->height;
-  // u32 color = 0xFFFFFFFF;
+  u32 color = ((f32_round_to_u32(r * 255.0f) << 16) |
+               (f32_round_to_u32(g * 255.0f) << 8) |
+               (f32_round_to_u32(b * 255.0f) << 0));
 
   // Advance the pointer to the top left of the rectangle we're about to draw
   u8 *row=  (u8 *)buffer->memory + 
@@ -91,11 +93,85 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render) 
       // NOTE: Analog Movement Tuning
     } else {
       // NOTE: Digital Movement Tuning
+      f32 player_x_delta = 0.0f; // pixels per second
+      f32 player_y_delta = 0.0f; // pixels per second
+
+      if (controller->move_up.ended_down) {
+        player_y_delta = -1.0f;        
+      }
+      if (controller->move_down.ended_down) {
+        player_y_delta = 1.0f;        
+      }
+      if (controller->move_left.ended_down) {
+        player_x_delta = -1.0f;        
+      }
+      if (controller->move_right.ended_down) {
+        player_x_delta = 1.0f;        
+      }
+
+      // Multiply by 128 pixels per second
+      player_x_delta *= 128.0f;
+      player_y_delta *= 128.0f;
+
+      game_state->player_x += input->target_seconds_per_frame * player_x_delta;
+      game_state->player_y += input->target_seconds_per_frame * player_y_delta;
     }
   }
 
-  draw_rectangle(buffer, 0.0f, 0.0f, (f32)buffer->width, (f32)buffer->height, 0x00FF00FF);
-  draw_rectangle(buffer, 50.0f, 50.0f, 100.0f, 100.0f, 0xFFFFFFFF);
+  u32 tile_map[9][17] = {
+    { 1, 1, 1, 1,  1, 1, 1, 1,  0,  1, 1, 1, 1,  1, 1, 1, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 0, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 0 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 1, 1, 1,  1, 1, 1, 1,  0,  1, 1, 1, 1,  1, 1, 1, 1 }
+  };
+
+  // Clear screen
+  draw_rectangle(buffer, 0.0f, 0.0f, (f32)buffer->width, (f32)buffer->height, 1.0f, 0.0f, 1.0f);
+
+  f32 upper_left_x = -30;
+  f32 upper_left_y = 0;
+  f32 tile_width = 60.0f;
+  f32 tile_height = 60.0f;
+
+  for (int row = 0; row < 9; ++row) {
+    for (int col = 0; col < 17; ++col) {
+      u32 tile_id = tile_map[row][col];
+      f32 gray = 0.3f;
+
+      if (tile_id == 1) {
+        gray = 1.0f;
+      }
+
+      f32 min_x = upper_left_x + (f32)col * tile_width;
+      f32 min_y = upper_left_y + (f32)row * tile_height;
+      f32 max_x = min_x + tile_width;
+      f32 max_y = min_y + tile_height;
+      draw_rectangle(buffer, min_x, min_y, max_x, max_y, gray, gray, gray);
+    }
+  }
+
+  // game_state->player_x = 50.0f;
+  // game_state->player_y = 50.0f;
+
+  f32 player_red = 1.0f;
+  f32 player_green = 1.0f;
+  f32 player_blue = 0.0f;
+
+  f32 player_width = 0.75 * tile_width;
+  f32 player_height = tile_height;
+  f32 player_left = game_state->player_x - 0.5f * player_width;
+  f32 player_top = game_state->player_y - player_height;
+
+  draw_rectangle(buffer,
+    player_left, player_top,
+    player_left + player_width, player_top + player_height,
+    player_red, player_green, player_blue
+  );
 };
 
 
