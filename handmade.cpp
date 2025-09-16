@@ -27,15 +27,72 @@ static void output_sound(ThreadContext *thread_ctx, GameState *game_state, GameS
 		}
 }
 
-static i32 f32_round_to_i32(f32 val) {
+inline i32 f32_round_to_i32(f32 val) {
   i32 result = (i32)(val + 0.5f);
   return result;
 }
 
-static u32 f32_round_to_u32(f32 val) {
+inline u32 f32_round_to_u32(f32 val) {
   u32 result = (u32)(val + 0.5f);
   return result;
 }
+
+inline i32 f32_truncate_to_i32(f32 val) {
+  i32 result = (i32)val;
+  return result;
+}
+
+inline TileMap * world_get_tile_map(World *world, i32 tile_map_x, i32 tile_map_y) {
+  TileMap *tile_map = 0;
+
+  if ((tile_map_x >= 0) && (tile_map_x < world->tile_map_count_x) &&
+      (tile_map_y >= 0) && (tile_map_y < world->tile_map_count_y)) {
+    tile_map = &world->tile_maps[tile_map_y * world->tile_map_count_x + tile_map_x];
+  }
+
+  return tile_map;
+}
+
+inline u32 tile_map_get_unchecked_tile_value(TileMap *tile_map, i32 x, i32 y) {
+  u32 val = tile_map->tiles[y * tile_map->count_x + x];
+  return val;
+}
+
+inline bool tile_map_is_point_empty(TileMap *tile_map, f32 x, f32 y) {
+  bool empty = false;
+  i32 player_tile_x = f32_truncate_to_i32((x - tile_map->upper_left_x) / tile_map->tile_width);
+  i32 player_tile_y = f32_truncate_to_i32((y - tile_map->upper_left_y) / tile_map->tile_height);
+
+  if ((player_tile_x >= 0) && (player_tile_x < tile_map->count_x) &&
+      (player_tile_y >= 0) && (player_tile_y < tile_map->count_y))
+  {
+    u32 tile_map_val = tile_map_get_unchecked_tile_value(tile_map, player_tile_x, player_tile_y);
+    empty = tile_map_val == 0;
+  }
+
+  return empty;
+}
+
+inline bool world_is_point_empty(World *world, i32 tile_x, i32 tile_y, f32 x, f32 y) {
+  bool empty = false;
+  TileMap *tile_map = world_get_tile_map(world, tile_x, tile_y);
+
+  if (tile_map) {
+    i32 player_tile_x = f32_truncate_to_i32((x - tile_map->upper_left_x) / tile_map->tile_width);
+    i32 player_tile_y = f32_truncate_to_i32((y - tile_map->upper_left_y) / tile_map->tile_height);
+
+    if ((player_tile_x >= 0) && (player_tile_x < tile_map->count_x) &&
+        (player_tile_y >= 0) && (player_tile_y < tile_map->count_y))
+    {
+      u32 tile_map_val = tile_map_get_unchecked_tile_value(tile_map, player_tile_x, player_tile_y);
+      empty = tile_map_val == 0;
+    }
+  }
+  
+
+  return empty;
+}
+
 
 // Renders a small square as the player
 static void draw_rectangle(
@@ -79,7 +136,90 @@ static void draw_rectangle(
 extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render) {
   GameState *game_state = (GameState *)memory->permanent_storage;
 
+
+#define TILE_MAP_COUNT_X 17
+#define TILE_MAP_COUNT_Y 9
+
+  u32 tiles_00[TILE_MAP_COUNT_Y][TILE_MAP_COUNT_X] = {
+    { 1, 1, 1, 1,  1, 1, 1, 1,  1,  1, 1, 1, 1,  1, 1, 1, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 1, 1,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 1, 1, 0,  1,  0, 0, 1, 1,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  1,  0, 0, 0, 0,  0, 0, 0, 0 },
+    { 1, 1, 0, 0,  0, 0, 0, 0,  1,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 1, 1, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 1, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  1, 1, 1, 1 },
+    { 1, 1, 1, 1,  1, 1, 1, 1,  0,  1, 1, 1, 1,  1, 1, 1, 1 }
+  };
+
+  u32 tiles_01[TILE_MAP_COUNT_Y][TILE_MAP_COUNT_X] = {
+    { 1, 1, 1, 1,  1, 1, 1, 1,  0,  1, 1, 1, 1,  1, 1, 1, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 0 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 1, 1, 1,  1, 1, 1, 1,  1,  1, 1, 1, 1,  1, 1, 1, 1 }
+  };
+
+  u32 tiles_10[TILE_MAP_COUNT_Y][TILE_MAP_COUNT_X] = {
+    { 1, 1, 1, 1,  1, 1, 1, 1,  1,  1, 1, 1, 1,  1, 1, 1, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 0, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 1, 1, 1,  1, 1, 1, 1,  0,  1, 1, 1, 1,  1, 1, 1, 1 }
+  };
+
+  u32 tiles_11[TILE_MAP_COUNT_Y][TILE_MAP_COUNT_X] = {
+    { 1, 1, 1, 1,  1, 1, 1, 1,  0,  1, 1, 1, 1,  1, 1, 1, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 0, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
+    { 1, 1, 1, 1,  1, 1, 1, 1,  1,  1, 1, 1, 1,  1, 1, 1, 1 }
+  };
+
+  TileMap tile_maps[2][2];
+  tile_maps[0][0].count_x = TILE_MAP_COUNT_X;
+  tile_maps[0][0].count_y = TILE_MAP_COUNT_Y;
+  tile_maps[0][0].upper_left_x = -30;
+  tile_maps[0][0].upper_left_y = 0;
+  tile_maps[0][0].tile_width = 60.0f;
+  tile_maps[0][0].tile_height = 60.0f;
+  tile_maps[0][0].tiles = (u32 *)tiles_00;
+
+  tile_maps[0][1] = tile_maps[0][0];
+  tile_maps[0][1].tiles = (u32 *)tiles_01;
+
+  tile_maps[1][0] = tile_maps[0][0];
+  tile_maps[1][0].tiles = (u32 *)tiles_10;
+
+  tile_maps[1][1] = tile_maps[0][0];
+  tile_maps[1][1].tiles = (u32 *)tiles_11;
+
+  TileMap *tile_map = &tile_maps[0][0];
+
+  World world;
+  world.tile_map_count_x = 2;
+  world.tile_map_count_y = 2;
+  world.tile_maps = (TileMap *)tile_maps;
+  
+  f32 player_width = 0.75 * tile_map->tile_width;
+  f32 player_height = tile_map->tile_height;
+
   if (!memory->is_initialized) {
+    game_state->player_x = 130.0f;
+    game_state->player_y = 130.0f;
+
     memory->is_initialized = true;
   }
 
@@ -113,57 +253,49 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render) 
       player_x_delta *= 128.0f;
       player_y_delta *= 128.0f;
 
-      game_state->player_x += input->target_seconds_per_frame * player_x_delta;
-      game_state->player_y += input->target_seconds_per_frame * player_y_delta;
+      f32 new_player_x = game_state->player_x + input->target_seconds_per_frame * player_x_delta;
+      f32 new_player_y = game_state->player_y + input->target_seconds_per_frame * player_y_delta;
+
+      // i32 player_tile_x = f32_truncate_to_i32(new_player_x - tile_map.upper_left_x) / tile_map.tile_width);
+      // i32 player_tile_y = f32_truncate_to_i32(new_player_y - tile_map.upper_left_y) / tile_map.tile_height);
+
+      if (tile_map_is_point_empty(tile_map, new_player_x, new_player_y) &&
+          tile_map_is_point_empty(tile_map, new_player_x - 0.5f * player_width, new_player_y) &&
+          tile_map_is_point_empty(tile_map, new_player_x + 0.5f * player_width, new_player_y)
+      ) {
+        game_state->player_x = new_player_x;
+        game_state->player_y = new_player_y;
+      }
     }
   }
 
-  u32 tile_map[9][17] = {
-    { 1, 1, 1, 1,  1, 1, 1, 1,  0,  1, 1, 1, 1,  1, 1, 1, 1 },
-    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
-    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
-    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
-    { 0, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 0 },
-    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
-    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
-    { 1, 0, 0, 0,  0, 0, 0, 0,  0,  0, 0, 0, 0,  0, 0, 0, 1 },
-    { 1, 1, 1, 1,  1, 1, 1, 1,  0,  1, 1, 1, 1,  1, 1, 1, 1 }
-  };
 
-  // Clear screen
+  // Clear screen to magenta
   draw_rectangle(buffer, 0.0f, 0.0f, (f32)buffer->width, (f32)buffer->height, 1.0f, 0.0f, 1.0f);
 
-  f32 upper_left_x = -30;
-  f32 upper_left_y = 0;
-  f32 tile_width = 60.0f;
-  f32 tile_height = 60.0f;
-
-  for (int row = 0; row < 9; ++row) {
-    for (int col = 0; col < 17; ++col) {
-      u32 tile_id = tile_map[row][col];
+  /* Draw tile map */
+  for (int row = 0; row < TILE_MAP_COUNT_Y; ++row) {
+    for (int col = 0; col < TILE_MAP_COUNT_X; ++col) {
+      u32 tile_id = tile_map_get_unchecked_tile_value(tile_map, col, row);
       f32 gray = 0.3f;
 
       if (tile_id == 1) {
         gray = 1.0f;
       }
 
-      f32 min_x = upper_left_x + (f32)col * tile_width;
-      f32 min_y = upper_left_y + (f32)row * tile_height;
-      f32 max_x = min_x + tile_width;
-      f32 max_y = min_y + tile_height;
+      f32 min_x = tile_map->upper_left_x + (f32)col * tile_map->tile_width;
+      f32 min_y = tile_map->upper_left_y + (f32)row * tile_map->tile_height;
+      f32 max_x = min_x + tile_map->tile_width;
+      f32 max_y = min_y + tile_map->tile_height;
       draw_rectangle(buffer, min_x, min_y, max_x, max_y, gray, gray, gray);
     }
   }
 
-  // game_state->player_x = 50.0f;
-  // game_state->player_y = 50.0f;
-
+  /* Draw Player */
   f32 player_red = 1.0f;
   f32 player_green = 1.0f;
   f32 player_blue = 0.0f;
 
-  f32 player_width = 0.75 * tile_width;
-  f32 player_height = tile_height;
   f32 player_left = game_state->player_x - 0.5f * player_width;
   f32 player_top = game_state->player_y - player_height;
 
