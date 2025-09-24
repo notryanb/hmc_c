@@ -42,6 +42,12 @@ inline i32 f32_truncate_to_i32(f32 val) {
   return result;
 }
 
+#include<math.h> // TODO - eventually remove 
+inline i32 f32_floor_to_i32(f32 val) {
+  i32 result = (int)floorf(val);
+  return result;
+}
+
 inline TileMap * world_get_tile_map(World *world, i32 tile_map_x, i32 tile_map_y) {
   TileMap *tile_map = 0;
 
@@ -53,42 +59,75 @@ inline TileMap * world_get_tile_map(World *world, i32 tile_map_x, i32 tile_map_y
   return tile_map;
 }
 
-inline u32 tile_map_get_unchecked_tile_value(TileMap *tile_map, i32 x, i32 y) {
-  u32 val = tile_map->tiles[y * tile_map->count_x + x];
+inline u32 tile_map_get_unchecked_tile_value(World *world, TileMap *tile_map, i32 x, i32 y) {
+  Assert(tile_map);
+  Assert((x >= 0) && (x < world->count_x) && (y >= 0) && (y < world->count_y));
+  
+  u32 val = tile_map->tiles[y * world->count_x + x];
   return val;
 }
 
-inline bool tile_map_is_point_empty(TileMap *tile_map, f32 x, f32 y) {
+inline bool tile_map_is_point_empty(World *world, TileMap *tile_map, i32 x, i32 y) {
   bool empty = false;
-  i32 player_tile_x = f32_truncate_to_i32((x - tile_map->upper_left_x) / tile_map->tile_width);
-  i32 player_tile_y = f32_truncate_to_i32((y - tile_map->upper_left_y) / tile_map->tile_height);
 
-  if ((player_tile_x >= 0) && (player_tile_x < tile_map->count_x) &&
-      (player_tile_y >= 0) && (player_tile_y < tile_map->count_y))
-  {
-    u32 tile_map_val = tile_map_get_unchecked_tile_value(tile_map, player_tile_x, player_tile_y);
-    empty = tile_map_val == 0;
+  if (tile_map) {
+    if ((x >= 0) && (x < world->count_x) &&
+        (y >= 0) && (y < world->count_y))
+    {
+      u32 tile_map_val = tile_map_get_unchecked_tile_value(world, tile_map, x, y);
+      empty = tile_map_val == 0;
+    }
   }
 
   return empty;
 }
 
-inline bool world_is_point_empty(World *world, i32 tile_x, i32 tile_y, f32 x, f32 y) {
-  bool empty = false;
-  TileMap *tile_map = world_get_tile_map(world, tile_x, tile_y);
+static WorldPosition get_canonical_position(World *world, RawPosition raw_pos) {
+  WorldPosition world_pos;
+  world_pos.tile_map_x = raw_pos.tile_map_x;
+  world_pos.tile_map_y = raw_pos.tile_map_y;
 
-  if (tile_map) {
-    i32 player_tile_x = f32_truncate_to_i32((x - tile_map->upper_left_x) / tile_map->tile_width);
-    i32 player_tile_y = f32_truncate_to_i32((y - tile_map->upper_left_y) / tile_map->tile_height);
+  f32 x = raw_pos.x - world->upper_left_x;
+  f32 y = raw_pos.y - world->upper_left_y;
+  world_pos.tile_x = f32_floor_to_i32(x / world->tile_width);
+  world_pos.tile_y = f32_floor_to_i32(y / world->tile_height);
+  world_pos.x = x - world_pos.tile_x * world->tile_width;
+  world_pos.y = y - world_pos.tile_y * world->tile_height;
 
-    if ((player_tile_x >= 0) && (player_tile_x < tile_map->count_x) &&
-        (player_tile_y >= 0) && (player_tile_y < tile_map->count_y))
-    {
-      u32 tile_map_val = tile_map_get_unchecked_tile_value(tile_map, player_tile_x, player_tile_y);
-      empty = tile_map_val == 0;
-    }
+  Assert(world_pos.x >= 0);
+  Assert(world_pos.y >= 0);
+  Assert(world_pos.x < world->tile_width);
+  Assert(world_pos.y < world->tile_height);
+
+  if (world_pos.tile_x < 0) {
+    world_pos.tile_x = world->count_x + world_pos.tile_x;
+    --world_pos.tile_map_x;
   }
-  
+
+  if (world_pos.tile_y < 0) {
+    world_pos.tile_y = world->count_y + world_pos.tile_y;
+    --world_pos.tile_map_y;
+  }
+
+  if (world_pos.tile_x >= world->count_x) {
+    world_pos.tile_x = world_pos.tile_x - world->count_x;
+    ++world_pos.tile_map_x;
+  }
+
+  if (world_pos.tile_y >= world->count_y) {
+    world_pos.tile_y = world_pos.tile_y - world->count_y;
+    ++world_pos.tile_map_y;
+  }
+
+  return world_pos;
+}
+
+inline bool world_is_point_empty(World *world, RawPosition test_pos) {
+  bool empty = false;
+
+  WorldPosition canonical_pos = get_canonical_position(world, test_pos);
+  TileMap *tile_map = world_get_tile_map(world, canonical_pos.tile_map_x, canonical_pos.tile_map_y);
+  empty = tile_map_is_point_empty(world, tile_map, canonical_pos.tile_x, canonical_pos.tile_y);
 
   return empty;
 }
@@ -189,33 +228,28 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render) 
   };
 
   TileMap tile_maps[2][2];
-  tile_maps[0][0].count_x = TILE_MAP_COUNT_X;
-  tile_maps[0][0].count_y = TILE_MAP_COUNT_Y;
-  tile_maps[0][0].upper_left_x = -30;
-  tile_maps[0][0].upper_left_y = 0;
-  tile_maps[0][0].tile_width = 60.0f;
-  tile_maps[0][0].tile_height = 60.0f;
   tile_maps[0][0].tiles = (u32 *)tiles_00;
-
-  tile_maps[0][1] = tile_maps[0][0];
-  tile_maps[0][1].tiles = (u32 *)tiles_01;
-
-  tile_maps[1][0] = tile_maps[0][0];
-  tile_maps[1][0].tiles = (u32 *)tiles_10;
-
-  tile_maps[1][1] = tile_maps[0][0];
+  tile_maps[0][1].tiles = (u32 *)tiles_10;
+  tile_maps[1][0].tiles = (u32 *)tiles_01;
   tile_maps[1][1].tiles = (u32 *)tiles_11;
 
-  TileMap *tile_map = &tile_maps[0][0];
-
   World world;
+  world.count_x = TILE_MAP_COUNT_X;
+  world.count_y = TILE_MAP_COUNT_Y;
+  world.upper_left_x = -30;
+  world.upper_left_y = 0;
+  world.tile_width = 60.0f;
+  world.tile_height = 60.0f;
   world.tile_map_count_x = 2;
   world.tile_map_count_y = 2;
   world.tile_maps = (TileMap *)tile_maps;
-  
-  f32 player_width = 0.75 * tile_map->tile_width;
-  f32 player_height = tile_map->tile_height;
 
+  f32 player_width  = world.tile_width * 0.75;
+  f32 player_height = world.tile_height;
+
+  TileMap *tile_map = world_get_tile_map(&world, game_state->player_tile_map_x, game_state->player_tile_map_y);
+  Assert(tile_map);
+  
   if (!memory->is_initialized) {
     game_state->player_x = 130.0f;
     game_state->player_y = 130.0f;
@@ -256,15 +290,29 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render) 
       f32 new_player_x = game_state->player_x + input->target_seconds_per_frame * player_x_delta;
       f32 new_player_y = game_state->player_y + input->target_seconds_per_frame * player_y_delta;
 
-      // i32 player_tile_x = f32_truncate_to_i32(new_player_x - tile_map.upper_left_x) / tile_map.tile_width);
-      // i32 player_tile_y = f32_truncate_to_i32(new_player_y - tile_map.upper_left_y) / tile_map.tile_height);
+      RawPosition player_pos = {
+        .tile_map_x = game_state->player_tile_map_x,
+        .tile_map_y = game_state->player_tile_map_y,
+        .x = new_player_x,
+        .y = new_player_y,
+      };
 
-      if (tile_map_is_point_empty(tile_map, new_player_x, new_player_y) &&
-          tile_map_is_point_empty(tile_map, new_player_x - 0.5f * player_width, new_player_y) &&
-          tile_map_is_point_empty(tile_map, new_player_x + 0.5f * player_width, new_player_y)
+      RawPosition player_left_pos = player_pos;
+      player_left_pos.x -= 0.5f * player_width;
+
+      RawPosition player_right_pos = player_pos;
+      player_right_pos.x += 0.5f * player_width;
+      
+      if (world_is_point_empty(&world, player_pos) &&
+          world_is_point_empty(&world, player_left_pos) &&
+          world_is_point_empty(&world, player_right_pos)
       ) {
-        game_state->player_x = new_player_x;
-        game_state->player_y = new_player_y;
+        WorldPosition canonical_pos = get_canonical_position(&world, player_pos);
+        game_state->player_tile_map_x = canonical_pos.tile_map_x;
+        game_state->player_tile_map_y = canonical_pos.tile_map_y;
+
+        game_state->player_x = world.upper_left_x + world.tile_width * canonical_pos.tile_x + canonical_pos.x;
+        game_state->player_y = world.upper_left_y + world.tile_height * canonical_pos.tile_y + canonical_pos.y;
       }
     }
   }
@@ -276,17 +324,17 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render) 
   /* Draw tile map */
   for (int row = 0; row < TILE_MAP_COUNT_Y; ++row) {
     for (int col = 0; col < TILE_MAP_COUNT_X; ++col) {
-      u32 tile_id = tile_map_get_unchecked_tile_value(tile_map, col, row);
+      u32 tile_id = tile_map_get_unchecked_tile_value(&world, tile_map, col, row);
       f32 gray = 0.3f;
 
       if (tile_id == 1) {
         gray = 1.0f;
       }
 
-      f32 min_x = tile_map->upper_left_x + (f32)col * tile_map->tile_width;
-      f32 min_y = tile_map->upper_left_y + (f32)row * tile_map->tile_height;
-      f32 max_x = min_x + tile_map->tile_width;
-      f32 max_y = min_y + tile_map->tile_height;
+      f32 min_x = world.upper_left_x + (f32)col * world.tile_width;
+      f32 min_y = world.upper_left_y + (f32)row * world.tile_height;
+      f32 max_x = min_x + world.tile_width;
+      f32 max_y = min_y + world.tile_height;
       draw_rectangle(buffer, min_x, min_y, max_x, max_y, gray, gray, gray);
     }
   }

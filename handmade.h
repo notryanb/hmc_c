@@ -125,9 +125,39 @@ struct GameInput {
 struct GameState {
   f32 player_x;
   f32 player_y;
+
+  i32 player_tile_map_x;
+  i32 player_tile_map_y;
 };
 
 struct TileMap {
+  u32 *tiles;
+};
+
+struct WorldPosition {
+  i32 tile_map_x;  
+  i32 tile_map_y;
+  i32 tile_x;
+  i32 tile_y;
+
+  // Tile relative x/y
+  f32 x;
+  f32 y;
+};
+
+struct RawPosition {
+  i32 tile_map_x;  
+  i32 tile_map_y;
+
+  // tile-map relative x/y
+  f32 x;
+  f32 y;
+};
+
+struct World {
+  i32 tile_map_count_x;
+  i32 tile_map_count_y;
+
   i32 count_x;
   i32 count_y;
   
@@ -135,13 +165,6 @@ struct TileMap {
   f32 upper_left_y;
   f32 tile_width;
   f32 tile_height;
-
-  u32 *tiles;
-};
-
-struct World {
-  i32 tile_map_count_x;
-  i32 tile_map_count_y;
 
   TileMap *tile_maps;
 };
