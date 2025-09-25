@@ -135,6 +135,7 @@ struct TileMap {
 };
 
 struct WorldPosition {
+  // TODO: Pack tile map and tile indexes into single u32 x + y with hi-lo bits for each set of indexes
   i32 tile_map_x;  
   i32 tile_map_y;
   i32 tile_x;
@@ -155,6 +156,9 @@ struct RawPosition {
 };
 
 struct World {
+  f32 tile_size_meters;
+  i32 tile_size_pixels;
+
   i32 tile_map_count_x;
   i32 tile_map_count_y;
 
@@ -163,8 +167,6 @@ struct World {
   
   f32 upper_left_x;
   f32 upper_left_y;
-  f32 tile_width;
-  f32 tile_height;
 
   TileMap *tile_maps;
 };
