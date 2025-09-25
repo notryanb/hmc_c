@@ -1,4 +1,5 @@
 #include "handmade.h"
+#include "handmade_intrinsics.h"
 
 
 // The sound_buffer is interleaved LRLRLR...
@@ -27,26 +28,6 @@ static void output_sound(ThreadContext *thread_ctx, GameState *game_state, GameS
 		}
 }
 
-inline i32 f32_round_to_i32(f32 val) {
-  i32 result = (i32)(val + 0.5f);
-  return result;
-}
-
-inline u32 f32_round_to_u32(f32 val) {
-  u32 result = (u32)(val + 0.5f);
-  return result;
-}
-
-inline i32 f32_truncate_to_i32(f32 val) {
-  i32 result = (i32)val;
-  return result;
-}
-
-#include<math.h> // TODO - eventually remove 
-inline i32 f32_floor_to_i32(f32 val) {
-  i32 result = (int)floorf(val);
-  return result;
-}
 
 inline TileMap * world_get_tile_map(World *world, i32 tile_map_x, i32 tile_map_y) {
   TileMap *tile_map = 0;
@@ -89,15 +70,15 @@ static WorldPosition get_canonical_position(World *world, RawPosition raw_pos) {
 
   f32 x = raw_pos.x - world->upper_left_x;
   f32 y = raw_pos.y - world->upper_left_y;
-  world_pos.tile_x = f32_floor_to_i32(x / world->tile_width);
-  world_pos.tile_y = f32_floor_to_i32(y / world->tile_height);
-  world_pos.x = x - world_pos.tile_x * world->tile_width;
-  world_pos.y = y - world_pos.tile_y * world->tile_height;
+  world_pos.tile_x = f32_floor_to_i32(x / world->tile_size_pixels);
+  world_pos.tile_y = f32_floor_to_i32(y / world->tile_size_pixels);
+  world_pos.x = x - world_pos.tile_x * world->tile_size_pixels;
+  world_pos.y = y - world_pos.tile_y * world->tile_size_pixels;
 
   Assert(world_pos.x >= 0);
   Assert(world_pos.y >= 0);
-  Assert(world_pos.x < world->tile_width);
-  Assert(world_pos.y < world->tile_height);
+  Assert(world_pos.x < world->tile_size_pixels);
+  Assert(world_pos.y < world->tile_size_pixels);
 
   if (world_pos.tile_x < 0) {
     world_pos.tile_x = world->count_x + world_pos.tile_x;
@@ -234,18 +215,18 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render) 
   tile_maps[1][1].tiles = (u32 *)tiles_11;
 
   World world;
+  world.tile_size_meters = 1.4f;
+  world.tile_size_pixels = 60;
   world.count_x = TILE_MAP_COUNT_X;
   world.count_y = TILE_MAP_COUNT_Y;
-  world.upper_left_x = -30;
+  world.upper_left_x = -(f32)world.tile_size_pixels / 2.0f;
   world.upper_left_y = 0;
-  world.tile_width = 60.0f;
-  world.tile_height = 60.0f;
   world.tile_map_count_x = 2;
   world.tile_map_count_y = 2;
   world.tile_maps = (TileMap *)tile_maps;
 
-  f32 player_width  = world.tile_width * 0.75;
-  f32 player_height = world.tile_height;
+  f32 player_width  = (f32)world.tile_size_pixels * 0.75;
+  f32 player_height = (f32)world.tile_size_pixels;
 
   TileMap *tile_map = world_get_tile_map(&world, game_state->player_tile_map_x, game_state->player_tile_map_y);
   Assert(tile_map);
@@ -311,8 +292,8 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render) 
         game_state->player_tile_map_x = canonical_pos.tile_map_x;
         game_state->player_tile_map_y = canonical_pos.tile_map_y;
 
-        game_state->player_x = world.upper_left_x + world.tile_width * canonical_pos.tile_x + canonical_pos.x;
-        game_state->player_y = world.upper_left_y + world.tile_height * canonical_pos.tile_y + canonical_pos.y;
+        game_state->player_x = world.upper_left_x + world.tile_size_pixels * canonical_pos.tile_x + canonical_pos.x;
+        game_state->player_y = world.upper_left_y + world.tile_size_pixels * canonical_pos.tile_y + canonical_pos.y;
       }
     }
   }
@@ -331,10 +312,10 @@ extern "C" __declspec(dllexport) GAME_UPDATE_AND_RENDER(game_update_and_render) 
         gray = 1.0f;
       }
 
-      f32 min_x = world.upper_left_x + (f32)col * world.tile_width;
-      f32 min_y = world.upper_left_y + (f32)row * world.tile_height;
-      f32 max_x = min_x + world.tile_width;
-      f32 max_y = min_y + world.tile_height;
+      f32 min_x = world.upper_left_x + (f32)col * world.tile_size_pixels;
+      f32 min_y = world.upper_left_y + (f32)row * world.tile_size_pixels;
+      f32 max_x = min_x + world.tile_size_pixels;
+      f32 max_y = min_y + world.tile_size_pixels;
       draw_rectangle(buffer, min_x, min_y, max_x, max_y, gray, gray, gray);
     }
   }
